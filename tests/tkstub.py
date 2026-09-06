@@ -65,6 +65,17 @@ def _check_options(command: str, kwargs: dict[str, Any], receiver: str = "") -> 
     raise TclError(message)
 
 
+def _check_sequence(sequence: Any, widget: str = "") -> None:
+    """Raise ``TclError`` for a binding pattern Tk itself would refuse."""
+    try:
+        from tk_events import describe as _describe_sequence  # type: ignore[import-not-found]
+    except ImportError:  # pragma: no cover - helper module missing
+        return
+    message = _describe_sequence(str(sequence or ""))
+    if message:
+        raise TclError(message)
+
+
 def bound_sequences() -> set[str]:
     """All sequences bound so far, normalised (``<Control-Shift-Z>``)."""
     out: set[str] = set()
@@ -482,6 +493,7 @@ class _Widget:
     # ---- events
     def bind(self, sequence: str = "", func: Optional[Callable[[Any], Any]] = None,
              add: Any = None) -> str:
+        _check_sequence(sequence)
         if func is None:
             return ""
         self._bindings.setdefault(sequence, []).append(func)
@@ -490,12 +502,14 @@ class _Widget:
 
     def bind_all(self, sequence: str = "", func: Optional[Callable[[Any], Any]] = None,
                  add: Any = None) -> str:
+        _check_sequence(sequence)
         return self.bind(sequence, func, add)
 
     def unbind(self, sequence: str, funcid: Any = None) -> None:
         self._bindings.pop(sequence, None)
 
     def bind_class(self, className: str, sequence: str = "", func: Any = None, add: Any = None) -> str:
+        _check_sequence(sequence)
         return ""
 
     def event_add(self, sequence: str = "", *args: Any, **kwargs: Any) -> None:
@@ -1109,6 +1123,7 @@ class Text(_Widget):
         pass
 
     def tag_bind(self, tagName: str, sequence: str, func: Any, add: Any = None) -> str:
+        _check_sequence(sequence)
         return self.bind(sequence, func, add)
 
     def tag_nextrange(self, tagName: str, index1: Any, index2: Any = None) -> tuple[str, str]:
@@ -1333,6 +1348,7 @@ class Canvas(_Widget):
         return ()
 
     def tag_bind(self, tagOrId: Any, sequence: str, func: Any, add: Any = None) -> str:
+        _check_sequence(sequence)
         return ""
 
 

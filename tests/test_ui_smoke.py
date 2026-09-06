@@ -897,6 +897,71 @@ def test_stub_rejects_unknown_tk_options() -> None:
     assert describe("grid", ["row"], "frame") == ""
 
 
+def test_tk_event_sequences_are_valid() -> None:
+    """Tk parses binding patterns itself, so an invented keysym is not a Python
+    error: ``bind("<Control-keypad-plus>")`` raises ``TclError: bad event type
+    or keysym "keypad"`` while the widget is built - fatal in a windowed exe.
+    Check the grammar, the guard that enforces it, and that the sequences the
+    README promises are really bound (``<Control+KP_Add>`` used to be swallowed
+    by a bare ``except TclError``, so numpad zoom silently did nothing).
+    """
+    from tk_events import describe, validate
+
+    for good in ("<Control-KP_Add>", "<Control-KP_Subtract>", "<Control-a>", "<Double-1>",
+                 "<B1-Motion>", "<ButtonRelease-1>", "<Control-Shift-KeyPress-A>",
+                 "<KeyRelease>", "<less>", "<MouseWheel>", "<<Modified>>", '"', "<"):
+        assert validate(good), f"{good} was rejected: {describe(good)}"
+    for bad in ("<Control-keypad-plus>", "<Control+KP_Add>", "<Ctrl-a>",
+                "<Control-Shift-lowercase>", "<Control-numpad-subtract>"):
+        assert not validate(bad), f"{bad} should be refused by Tk"
+
+    text = tkstub.Text(tkstub.ROOT)
+    try:
+        text.bind("<Control-keypad-plus>", lambda event: None)
+    except tkstub.TclError as exc:
+        assert "keypad" in str(exc), str(exc)
+    else:  # pragma: no cover - the guard would have rotted
+        raise AssertionError("the stub accepted a keysym the real interpreter rejects")
+
+    tools = ROOT / "tools"
+    if str(tools) not in sys.path:
+        sys.path.insert(0, str(tools))
+    import check_ctk_kwargs
+
+    problems, lines = check_ctk_kwargs.binding_problems(ROOT / "arduino_studio")
+    assert problems == 0, "invalid Tk binding pattern(s):\n" + "\n".join(lines[:10])
+    problems, lines = check_ctk_kwargs.tk_option_problems(ROOT / "arduino_studio")
+    assert problems == 0, "misspelled Tk option(s):\n" + "\n".join(lines[:10])
+
+    with tempfile.TemporaryDirectory() as tmp:
+        _manager, project = make_project(Path(tmp))
+        document = code_editor.EditorDocument(path=project.root / "SmokeTest.ino")
+        document.reload_from_disk()
+        editor = code_editor.CodeEditor(tkstub.ROOT, PALETTE, document=document,
+                                       settings=Settings())
+        panel = console.ConsolePanel(tkstub.ROOT, PALETTE,
+                                    on_jump=lambda f, l: None, settings=Settings())
+        tkstub.pump(40)
+        # look at these two widgets, not the process-wide list: other tests have
+        # already built editors, so "newly bound" would be empty
+        bound = set(editor.text._bindings) | set(panel.text._bindings)
+        for sequence in ("<Control-KP_Add>", "<Control-KP_Subtract>", "<Control-plus>",
+                        "<Control-minus>", "<Control-equal>", "<less>", "<braceleft>",
+                        "<parenright>", "<quotedbl>"):
+            assert sequence in bound, f"{sequence} is not bound (have {sorted(bound)[:8]})"
+        # the auto-close pairs still pair up, including the angle bracket
+        editor.text.delete("1.0", "end-1c")
+        editor._auto_close_brackets = True
+        editor._auto_close_quotes = True
+        editor.text.dispatch("<less>", {})
+        tkstub.pump(20)
+        assert editor.text.get("1.0", "end-1c") == "<>", editor.text.get("1.0", "end-1c")
+        for delta in (1, 2, -1, -2):
+            panel._zoom_font(1 if delta > 0 else -1)
+            editor._zoom_font(1 if delta > 0 else -1)
+        assert editor.text.cget("font") is not None
+
+
 def main() -> int:
     """Run every ``test_*`` function and report failures (pytest-free mode)."""
     wanted = [arg.lower() for arg in sys.argv[1:] if not arg.startswith("-")]

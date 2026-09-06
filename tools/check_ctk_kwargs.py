@@ -260,6 +260,68 @@ def tk_option_problems(scan_dir: pathlib.Path, tests_dir: Optional[pathlib.Path]
     return problems, lines
 
 
+#: which argument of a binding call holds the sequence ("args" = index)
+BINDING_CALLS = {"bind": 0, "bind_all": 0, "event_generate": 0,
+                 "bind_class": 1, "tag_bind": 1, "window_bind": 1}
+
+
+def binding_problems(scan_dir: pathlib.Path, tests_dir: Optional[pathlib.Path] = None, *,
+                     verbose: bool = False) -> tuple[int, list[str]]:
+    """Report Tk binding patterns the interpreter would refuse.
+
+    ``bind("<Control-keypad-plus>")`` is not a Python error - Tk parses the
+    pattern itself and raises ``TclError: bad event type or keysym`` when the
+    widget is built, so a typo in a binding that runs during start-up looks like
+    "Arduino Studio.exe will not open".  ``tests/tk_events.py`` holds the
+    grammar; the Tk stub enforces it at run time, this scans it statically,
+    which also catches sequences wrapped in ``try/except TclError`` (those just
+    stop working instead of failing loudly).
+    """
+    scan_dir = pathlib.Path(scan_dir).resolve()
+    repo_root = scan_dir.parent
+    search = [pathlib.Path(tests_dir)] if tests_dir else [repo_root / "tests"]
+    search.append(pathlib.Path(__file__).resolve().parent.parent / "tests")
+    for folder in search:
+        if (folder / "tk_events.py").is_file():
+            if str(folder) not in sys.path:
+                sys.path.insert(0, str(folder))
+            break
+    else:  # pragma: no cover - defensive
+        return 1, ["  FAIL tests/tk_events.py not found - cannot check binding sequences"]
+    from tk_events import describe as describe_sequence  # type: ignore[import-not-found]
+
+    problems = 0
+    lines: list[str] = []
+    for path in sorted(scan_dir.rglob("*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError) as exc:  # pragma: no cover - defensive
+            problems += 1
+            lines.append(f"  FAIL {path}: cannot parse ({exc})")
+            continue
+        relative = path.relative_to(repo_root).as_posix() if path.is_relative_to(repo_root) else path.name
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            index = BINDING_CALLS.get(node.func.attr)
+            if index is None:
+                continue
+            arguments = list(node.args)
+            if len(arguments) <= index:
+                continue  # keyword form: bind(sequence=...) is not used here
+            literal = arguments[index]
+            if not (isinstance(literal, ast.Constant) and isinstance(literal.value, str)):
+                continue  # built at run time - the stub validates those instead
+            message = describe_sequence(str(literal.value))
+            if not message:
+                continue
+            problems += 1
+            lines.append(f"  FAIL {relative}:{node.lineno}: {message}")
+    if verbose and not problems:
+        lines.append("  ok   every binding pattern is one Tk understands")
+    return problems, lines
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     """Command line entry point."""
     parser = argparse.ArgumentParser(description="verify CustomTkinter widget keyword arguments")
@@ -294,6 +356,17 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"RESULT: {tk_problems} misspelled Tk option(s) - TclError at run time.")
         return 1
     print("RESULT: Tk option names are valid too.")
+
+    bind_problems, bind_lines = binding_problems(pathlib.Path(args.package_root),
+                                                verbose=bool(args.verbose))
+    print("\nTk binding pattern check (bind / bind_all / tag_bind / event_generate)")
+    for line in bind_lines or ["  ok   every pattern parses as a Tk event sequence"]:
+        print(line)
+    if bind_problems:
+        print(f"RESULT: {bind_problems} invalid binding pattern(s) - "
+              "Tk raises bad event type or keysym.")
+        return 1
+    print("RESULT: the bindings are valid Tk sequences as well.")
     return 0
 
 

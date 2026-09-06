@@ -69,6 +69,22 @@ _MATCH_TAGS: tuple[str, ...] = (
 )
 
 _PAIRS: dict[str, str] = {"(": ")", "[": "]", "{": "}", '"': '"', "'": "'", "<": ">"}
+
+#: Binding a raw character is not always a legal Tk sequence (``<`` cannot stand
+#: for "the less-than key"), so each character names the sequence selecting its
+#: keysym instead.  The quote handler is bound through its own map because
+#: ``_on_open_char`` also has to see ``"``/``'`` when only bracket auto-close is
+#: enabled.
+OPEN_KEY_SEQUENCES: dict[str, str] = {
+    "(": "<parenleft>", "[": "<bracketleft>", "{": "<braceleft>", "<": "<less>",
+    '"': "<quotedbl>", "'": "<apostrophe>",
+}
+
+CLOSE_KEY_SEQUENCES: dict[str, str] = {
+    ")": "<parenright>", "]": "<bracketright>", "}": "<braceright>", ">": "<greater>",
+}
+
+QUOTE_KEY_SEQUENCES: dict[str, str] = {'"': "<quotedbl>", "'": "<apostrophe>"}
 _CLOSERS: frozenset[str] = frozenset(")]}\"'")
 _BRACKETS: str = "()[]{}"
 _LINE_COMMENT = "//"
@@ -412,9 +428,9 @@ class CodeEditor(ctk.CTkFrame):
             ("<Next>", lambda: self._page(1)),
             ("<F2>", lambda: "break" if self._goto_next_error(1) else ""),
             ("<Shift-F2>", lambda: "break" if self._goto_next_error(-1) else ""),
-            ("<Control+KP_Add>", lambda: self._zoom_font(1)),
+            ("<Control-KP_Add>", lambda: self._zoom_font(1)),
             ("<Control-plus>", lambda: self._zoom_font(1)),
-            ("<Control+KP_Subtract>", lambda: self._zoom_font(-1)),
+            ("<Control-KP_Subtract>", lambda: self._zoom_font(-1)),
             ("<Control-minus>", lambda: self._zoom_font(-1)),
             ("<Control-equal>", lambda: self._zoom_font(1)),
             ("<MouseWheel>", self._on_mouse_wheel),
@@ -422,22 +438,28 @@ class CodeEditor(ctk.CTkFrame):
         ):
             try:
                 text.bind(sequence, handler, add=True)
-            except tk.TclError:  # pragma: no cover - some sequences are platform specific
+            except tk.TclError as exc:  # some sequences are platform specific
+                # logged, not swallowed silently: "Ctrl+= does nothing" is
+                # otherwise indistinguishable from a broken key handler
+                self._log.debug("sequence %s could not be bound: %s", sequence, exc)
                 continue
-        for char in _PAIRS:
+        for char, sequence in OPEN_KEY_SEQUENCES.items():
             try:
-                text.bind(char, (lambda event, ch=char: self._on_open_char(ch)), add=True)
-            except tk.TclError:  # pragma: no cover
+                text.bind(sequence, (lambda event, ch=char: self._on_open_char(ch)), add=True)
+            except tk.TclError as exc:  # pragma: no cover
+                self._log.debug("open-char binding %s failed: %s", sequence, exc)
                 continue
-        for closer in ")]}>":
+        for char, sequence in CLOSE_KEY_SEQUENCES.items():
             try:
-                text.bind(closer, (lambda event, ch=closer: self._on_close_char(ch)), add=True)
-            except tk.TclError:  # pragma: no cover
+                text.bind(sequence, (lambda event, ch=char: self._on_close_char(ch)), add=True)
+            except tk.TclError as exc:  # pragma: no cover
+                self._log.debug("close-char binding %s failed: %s", sequence, exc)
                 continue
-        for quote in ("\"", "'"):
+        for char, sequence in QUOTE_KEY_SEQUENCES.items():
             try:
-                text.bind(quote, (lambda event, ch=quote: self._on_quote_char(ch)), add=True)
-            except tk.TclError:  # pragma: no cover
+                text.bind(sequence, (lambda event, ch=char: self._on_quote_char(ch)), add=True)
+            except tk.TclError as exc:  # pragma: no cover
+                self._log.debug("quote binding %s failed: %s", sequence, exc)
                 continue
 
     # ------------------------------------------------------------- edit hooks

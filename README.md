@@ -558,7 +558,7 @@ sure no menu item advertises a shortcut that nothing binds.
 | Ctrl+G go to line | Ctrl+Shift+E new example | Ctrl+[ or Ctrl+] go to matching bracket |
 | Ctrl+F find, Ctrl+H replace | Ctrl+P command palette | Ctrl+L select line · Ctrl+Space completions |
 | F3 / Shift+F3 find next / previous | F5 refresh boards and ports | Ctrl+Home / Ctrl+End document start / end |
-| F2 / Shift+F2 next / previous build error | Alt+→ / Alt+← / Ctrl+Tab / Ctrl+Shift+Tab cycle tabs | Ctrl+= or Ctrl++ zoom in · Ctrl+- zoom out · Ctrl+0 reset zoom |
+| F2 / Shift+F2 next / previous build error | Alt+→ / Alt+← / Ctrl+Tab / Ctrl+Shift+Tab cycle tabs | Ctrl+= or Ctrl++ zoom in · Ctrl+- zoom out · Ctrl+0 reset zoom · the numpad `KP_Add` / `KP_Subtract` keys work in the editor and console |
 | Escape close the find bar | View ▸ Console / Serial Monitor / Terminal | Page Up / Page Down |
 
 The **Command Palette** (Ctrl+P) is a fuzzy list of every action
@@ -694,7 +694,7 @@ line. Cancellations are recorded as cancelled, not as errors.
 python tests/test_core_flow.py     :: 24 tests: projects, settings, CLI argv shapes,
                                      diagnostics, libraries, bootloader, serial,
                                      terminal, threading, process layer, examples
-python tests/test_ui_smoke.py      :: 20 tests: every panel/dialog, driven against a
+python tests/test_ui_smoke.py      :: 21 tests: every panel/dialog, driven against a
                                      Tk stub so they run headless; the stub rejects
                                      widget options the real interpreter would reject.
                                      Pass name fragments (python tests/test_ui_smoke.py
@@ -776,6 +776,7 @@ The usual causes, in the order they are worth checking:
 | The bundle missed the lazily-imported UI package (`ModuleNotFoundError: No module named 'arduino_studio.ui.app'`) | rebuild with the current `arduino_studio.spec` — it runs `collect_submodules("arduino_studio")` for exactly this reason. |
 | The UI passes a widget option CustomTkinter does not know (e.g. `CTkButton(..., padx=12)`) — it raises `ValueError: ['padx'] are not supported arguments` while the window is being built | run `python tools\check_ctk_kwargs.py`; Tk-only options belong on `.grid()`/`.pack()`, not on the widget. `build_exe.bat` runs this check before PyInstaller starts. |
 | A Tk option name is misspelled (e.g. `Treeview.column(min_width=...)` where ttk calls it `minwidth`) — it raises `TclError: unknown option "-min_width"` while the window is being built, so the exe opens and closes again | run `python tools\check_ctk_kwargs.py`; it checks every `grid`/`pack`/`place`, `Treeview.column`/`heading` and `Menu.add_*` option name against `tests/tk_options.py`, and `tests/tkstub.py` rejects the same names at run time. |
+| A key binding names a keysym Tk does not know (e.g. `<Control-keypad-plus>`, or `<Control+KP_Add>` with a `+` separator) — it raises `TclError: bad event type or keysym "keypad"` while the window is being built | run `python tools\check_ctk_kwargs.py`; it parses every `bind`/`bind_all`/`tag_bind` pattern in `arduino_studio/` against `tests/tk_events.py`. Tk spells the numpad `KP_Add`/`KP_Subtract` and joins modifiers with `-`, never `+`. |
 | Antivirus / SmartScreen deleted or blocked the exe | allow the folder, or build with `pyinstaller --onedir` yourself and sign it. |
 | Corrupt profile after an earlier crash | delete `%APPDATA%\ArduinoStudio\settings.json`, or start with `--config-dir` pointing at a scratch folder. |
 
@@ -784,15 +785,21 @@ Two checks wrap the build so a broken bundle never reaches you.
 `ctk.CTk*` constructor and `.configure()` keyword against the CustomTkinter that is
 actually installed (its options are *not* Tk's options), plus every
 `grid`/`pack`/`place`, `Treeview.column`/`heading` and `Menu.add_*` option name against
-the tables in `tests/tk_options.py`. **`tools/check_dist.py`** validates the result: an
+the tables in `tests/tk_options.py`. It also parses every `bind` / `bind_all` /
+`tag_bind` / `event_generate` pattern in the package against the Tk grammar in
+`tests/tk_events.py`, which is the only way to notice a keysym typo hidden inside a
+`try/except TclError` (those bindings simply never fire). **`tools/check_dist.py`** validates the result: an
 exe of a plausible size, `_internal/` present, CustomTkinter's theme JSON collected, and
 no "missing module named arduino_studio…" in PyInstaller's own warning file. If any of
 that is wrong the script exits non-zero and `build_exe.bat` stops with
 `dist\build_check.txt` explaining what to fix.
 
-Both checks are also tests: `tests/test_ui_smoke.py` runs the option scan and
-`tests/tkstub.py` raises `TclError` for an option the real interpreter would reject, so
-a typo fails in the repository instead of on someone's desktop. Run them directly with
+Both checks are also tests. `tests/test_ui_smoke.py` runs them over the whole package,
+and `tests/tkstub.py` enforces the same rules at run time — it raises `TclError` for an
+option name or a binding pattern the real interpreter would reject, so a typo fails in
+the repository instead of on someone's desktop. That matters most for the sequences
+bound inside `try/except TclError`, which otherwise stop working in silence. Run them
+directly with
 `python tests\test_ui_smoke.py` and `python tests\test_core_flow.py`.
 
 `pyproject.toml` metadata (`pip install .`) and `run.py` are kept in sync with the
@@ -838,7 +845,8 @@ arduino_studio/
 │   ├── icons.py             glyphs + the generated .ico
 │   └── widgets/             dialogs, toolbar, explorer, status bar, console, text view, data table
 ├── tools/make_icon.py       icon generator (no binary assets in git)
-├── tests/                   the two suites + fake_arduino_cli.py
+├── tests/                   the two suites + fake_arduino_cli.py + the Tk stub/grammar
+#                            (tkstub.py, tk_options.py, tk_events.py) the checks lean on
 ├── requirements.txt         customtkinter, pyserial (+ send2trash optional)
 ├── requirements-dev.txt     pyinstaller, ruff, mypy, pytest
 ├── pyproject.toml           package metadata + `arduino-studio` console script

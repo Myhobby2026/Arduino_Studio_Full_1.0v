@@ -159,8 +159,11 @@ class ConsolePanel(ctk.CTkFrame):
         self.text.bind("<Double-Button-1>", self._maybe_jump, add=True)
         self.text.bind("<Button-1>", self._maybe_jump_cursor, add=True)
         self.text.bind("<Control-plus>", lambda e: self._zoom_font(1), add=True)
-        self.text.bind("<Control-keypad-plus>", lambda e: self._zoom_font(1), add=True)
+        # Tk spells the numpad keys KP_Add / KP_Subtract; "keypad-plus" is not a
+        # keysym at all, and an unknown one makes bind() raise TclError.
+        self.text.bind("<Control-KP_Add>", lambda e: self._zoom_font(1), add=True)
         self.text.bind("<Control-minus>", lambda e: self._zoom_font(-1), add=True)
+        self.text.bind("<Control-KP_Subtract>", lambda e: self._zoom_font(-1), add=True)
         self.text.bind("<Control-equal>", lambda e: self._zoom_font(1), add=True)
         self._apply_jump_tag()
 
