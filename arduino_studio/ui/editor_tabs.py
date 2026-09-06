@@ -50,7 +50,7 @@ class TabButton(ctk.CTkFrame):
         self.body = ctk.CTkFrame(self, fg_color="transparent", corner_radius=8)
         self.body.pack(fill="both", expand=True, padx=1, pady=1)
         self.close_button = ctk.CTkButton(
-            self.body, text="\u2715", width=22, height=22, corner_radius=4, padx=0,
+            self.body, text="\u2715", width=22, height=22, corner_radius=4,
             fg_color="transparent", hover_color=palette.hover, text_color=palette.text_muted,
             font=(palette.font_family, 10), command=lambda: self._on_close(),
         )
@@ -197,7 +197,7 @@ class EditorTabs(ctk.CTkFrame):
         self.tab_canvas.bind("<Button-5>", lambda event: self._strip_scroll(1), add=True)
 
         self.add_button = ctk.CTkButton(
-            strip, text="+", width=28, height=26, corner_radius=6, padx=0,
+            strip, text="+", width=28, height=26, corner_radius=6,
             fg_color="transparent", hover_color=palette.hover, text_color=palette.text_dim,
             font=(palette.font_family, 15), command=self._new_file_clicked,
         )

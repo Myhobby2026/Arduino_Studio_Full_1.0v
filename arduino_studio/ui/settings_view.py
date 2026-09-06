@@ -229,8 +229,6 @@ class SettingsView(ctk.CTkFrame):
                                    segmented_button_selected_color=palette.accent,
                                    segmented_button_unselected_color=palette.panel_bg,
                                    segmented_button_selected_hover_color=palette.accent_hover,
-                                   segmented_button_selected_fg_color=palette.accent_text,
-                                   segmented_button_unselected_fg_color=palette.text_dim,
                                    text_color=palette.text)
         self.tabs.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 6))
         for name in SETTINGS_TABS:

@@ -771,11 +771,17 @@ The usual causes, in the order they are worth checking:
 | Only `Arduino Studio.exe` was copied; `_internal\` is missing | copy (or zip) the **whole** `Arduino Studio` folder. |
 | `build_exe.bat` ran with a Python that has no Tkinter (e.g. the Microsoft Store build) | use the python.org installer's `py -3.12`; `build_exe.bat` refuses a Python where `import tkinter` fails. |
 | The bundle missed the lazily-imported UI package (`ModuleNotFoundError: No module named 'arduino_studio.ui.app'`) | rebuild with the current `arduino_studio.spec` — it runs `collect_submodules("arduino_studio")` for exactly this reason. |
+| The UI passes a widget option CustomTkinter does not know (e.g. `CTkButton(..., padx=12)`) — it raises `ValueError: ['padx'] are not supported arguments` while the window is being built | run `python tools\check_ctk_kwargs.py`; Tk-only options belong on `.grid()`/`.pack()`, not on the widget. `build_exe.bat` runs this check before PyInstaller starts. |
 | Antivirus / SmartScreen deleted or blocked the exe | allow the folder, or build with `pyinstaller --onedir` yourself and sign it. |
 | Corrupt profile after an earlier crash | delete `%APPDATA%\ArduinoStudio\settings.json`, or start with `--config-dir` pointing at a scratch folder. |
 
-`build_exe.bat` finishes by running **`tools/check_dist.py`**, which answers this
-question for you instead: does the folder contain an exe of a plausible size, is
+Two checks wrap the build so a broken bundle never reaches you:
+**`tools/check_ctk_kwargs.py`** validates every `ctk.CTk*` constructor and
+`.configure()` keyword against the CustomTkinter that is installed (its options are
+not Tk's options), and **`tools/check_dist.py`** validates the result: does the
+folder contain an exe of a plausible size, is `_internal/` there, did CustomTkinter's
+theme JSON get collected, and did PyInstaller's own warning file mention a missing
+`arduino_studio` module? does the folder contain an exe of a plausible size, is
 `_internal/` there, did CustomTkinter's theme JSON files get collected, and did
 PyInstaller's own warning file mention a missing `arduino_studio` module? If any
 of that is wrong the script exits non-zero and `build_exe.bat` stops with

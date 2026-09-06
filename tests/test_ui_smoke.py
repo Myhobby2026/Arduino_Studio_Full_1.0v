@@ -839,6 +839,28 @@ def test_libraries_panel_offers_unsafe_install_fix() -> None:
             del cli, manager
 
 
+def test_customtkinter_widget_options_are_supported() -> None:
+    """CustomTkinter raises ValueError for options it does not know, the moment a
+    widget is built - inside a windowed exe that looks like "the app will not
+    open".  Validate every ``ctk.CTk*`` constructor (and ``.configure``) keyword
+    against the *installed* CustomTkinter sources before shipping.
+    """
+    tools = ROOT / "tools"
+    if str(tools) not in sys.path:
+        sys.path.insert(0, str(tools))
+    import check_ctk_kwargs
+
+    package = check_ctk_kwargs.customtkinter_root()
+    if package is None:
+        print("     (skipped: customtkinter is not installed in this environment)")
+        return
+    problems, lines = check_ctk_kwargs.check(ROOT / "arduino_studio", package)
+    assert problems == 0, (
+        "unsupported CustomTkinter option(s); the widget constructor will raise:\n"
+        + "\n".join(lines[:12])
+    )
+
+
 def main() -> int:
     """Run every ``test_*`` function and report failures (pytest-free mode)."""
     tests = [(name, obj) for name, obj in sorted(globals().items())
