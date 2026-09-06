@@ -1,0 +1,35 @@
+# ---------------------------------------------------------------------------
+# Arduino Studio - runtime dependencies
+#
+#   python -m pip install -r requirements.txt
+#
+# Python 3.9 or newer is required (3.11/3.12 recommended).  On Windows use the
+# python.org installer - it ships Tkinter; on Debian/Ubuntu Tkinter is a
+# separate package (sudo apt install python3-tk).
+# ---------------------------------------------------------------------------
+
+# The modern Tk widget toolkit the whole UI is built on.  CustomTkinter draws
+# its own widgets, which is what gives Arduino Studio its dark theme; it needs
+# nothing beyond Tkinter itself.
+customtkinter>=5.2.2,<7.0
+
+# Serial monitor (port enumeration + read/write thread).  Arduino Studio falls
+# back to `arduino-cli board list` / `upload-port list` when this is missing,
+# but the monitor will not work without it.
+pyserial>=3.5
+
+# ---------------------------------------------------------------------------
+# Optional extras
+# ---------------------------------------------------------------------------
+
+# Send deleted projects to the Recycle Bin / Trash instead of archiving them as
+# a zip next to the project folder.  Purely a safety nicety - the app works
+# without it (see ProjectManager.delete_project).
+send2trash>=1.8.0
+
+# ---------------------------------------------------------------------------
+# Only needed when you want to build the standalone Windows .exe or run the
+# test suite (see README.md -> "Building a standalone .exe").
+#
+#   python -m pip install -r requirements-dev.txt
+# ---------------------------------------------------------------------------

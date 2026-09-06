@@ -1,0 +1,107 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arduino-studio"
+description = "A standalone Arduino IDE for Windows that drives arduino-cli (no Arduino IDE required)."
+readme = "README.md"
+requires-python = ">=3.9"
+dynamic = ["version"]
+authors = [{ name = "Arduino Studio" }]
+keywords = ["arduino", "arduino-cli", "ide", "tkinter", "customtkinter", "embedded", "serial"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: Developers",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Embedded Systems",
+    "Typing :: Typed",
+]
+dependencies = [
+    "customtkinter>=5.2.2,<7.0",
+    "pyserial>=3.5",
+]
+
+[project.optional-dependencies]
+trash = ["send2trash>=1.8.0"]
+dev = ["pyinstaller>=6.0", "ruff>=0.1.0", "mypy>=1.4", "pytest>=7.0"]
+
+[project.scripts]
+arduino-studio = "arduino_studio.main:main"
+
+[project.urls]
+Documentation = "https://docs.arduino.cc"
+"Arduino CLI" = "https://docs.arduino.cc/arduino-cli/"
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.dynamic]
+version = { attr = "arduino_studio.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["arduino_studio*"]
+namespaces = false
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RET", "ARG", "RUF"]
+ignore = [
+    "E501",   # long lines: the UI builds a lot of descriptive labels
+    "ARG002", # tk callbacks receive (event) whether they use it or not
+    "SIM105", # contextlib.suppress hides the intent of our explicit except: pass
+    "RUF001", # the UI legitimately contains unicode arrows/glyphs in strings
+    "RUF002",
+    "RUF003",
+    "UP038",  # isinstance unions with | are 3.10+, this codebase targets 3.9
+    "UP006",  # annotations stay typing.List/Dict so dataclasses keep working on 3.9
+    "UP007",  # ... and Optional[X] over X | None for the same reason
+    "UP045",
+    "RET504", # "unnecessary assignment before return" hurts readability in the UI layer
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "ARG001", "E402", "PTH", "B008", "ANN", "D"]
+"arduino_studio/ui/app.py" = ["D401"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+known-first-party = ["arduino_studio"]
+
+[tool.mypy]
+python_version = "3.9"
+files = ["arduino_studio"]
+ignore_missing_imports = true
+warn_unused_ignores = false
+warn_redundant_casts = true
+no_implicit_optional = true
+check_untyped_defs = true
+disallow_untyped_calls = false
+disallow_untyped_defs = false
+follow_imports = "silent"
+
+[[tool.mypy.overrides]]
+module = "customtkinter.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "serial.*"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"

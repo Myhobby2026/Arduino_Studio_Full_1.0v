@@ -1,0 +1,19 @@
+# Development / packaging extras for Arduino Studio.
+#
+#   python -m pip install -r requirements.txt -r requirements-dev.txt
+#
+# The tests in tests/ are plain scripts (``python tests/test_ui_smoke.py``) and
+# have no third-party requirements - pytest is only a convenience so they can
+# also be collected by an IDE test runner.
+
+-r requirements.txt
+
+# Builds ArduinoStudio.exe (see arduino_studio.spec / build_exe.bat).
+pyinstaller>=6.0
+
+# Static checks used while developing; both are optional.
+ruff>=0.1.0
+mypy>=1.4
+
+# Optional convenience for running tests/test_*.py.
+pytest>=7.0

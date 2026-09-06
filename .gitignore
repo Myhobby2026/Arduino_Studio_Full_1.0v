@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Arduino Studio artefacts
+*.log
+logs/
+arduino_studio/resources/*.ico
+arduino_studio/resources/version_info.txt
+
+# PyInstaller
+*.manifest
+ArduinoStudio/
+ArduinoStudio.exe
+
+# Editors / OS
+.vscode/
+.idea/
+*.sublime-project
+Thumbs.db
+desktop.ini
+
+# Sketch build output (kept out of version control; project folders have their own .gitignore)
+**/build/Release/
+**/build/Debug/
+*.elf
+*.map
