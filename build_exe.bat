@@ -75,6 +75,16 @@ if errorlevel 1 (
     exit /b 1
 )
 
+echo --- verifying the bundle is complete
+"%VENV_PY%" tools\check_dist.py --log "dist\build_check.txt"
+if errorlevel 1 (
+    echo.
+    echo ERROR: the exe was built but is incomplete - it would start and close again.
+    echo        See dist\build_check.txt for the exact missing modules.
+    pause
+    exit /b 1
+)
+
 echo.
 echo ===========================================================================
 echo  Done. The app is in:
@@ -83,6 +93,12 @@ echo.
 echo  Copy the whole "Arduino Studio" folder to the target machine ^(not just the
 echo  exe^). Start it with a double-click; the first run asks for the arduino-cli
 echo  location if it is not on PATH.
+echo.
+echo  If the window never appears: start it from a terminal to see the exit code -
+echo      cd "dist\Arduino Studio"
+echo      ".\Arduino Studio.exe" --check
+echo  and look in %APPDATA%\ArduinoStudio\logs\ ^startup_error.log, arduino_studio.log (a crash there
+echo  writes startup_error.log and pops up a dialog).
 echo ===========================================================================
 echo.
 pause

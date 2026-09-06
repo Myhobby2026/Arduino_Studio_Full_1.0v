@@ -652,6 +652,42 @@ def test_process_layer() -> None:
     assert wait_for(lambda: process.poll() is not None, timeout=5.0)
 
 
+def test_packaging_spec_covers_the_lazy_ui_imports() -> None:
+    """A windowed exe dies silently when the lazily imported UI is not collected.
+
+    ``arduino_studio.ui`` hands out ``create_app`` through a PEP 562
+    ``__getattr__`` (so ``--help``/``--check`` never touch Tk), which means
+    PyInstaller's static import graph only sees the empty ``ui/__init__.py``.
+    Without ``collect_submodules`` the built exe fails with
+    ``No module named 'arduino_studio.ui.app'`` - the classic "the .exe does not
+    open".  This pins the requirement so the spec cannot regress.
+    """
+    spec = (ROOT / "arduino_studio.spec").read_text(encoding="utf-8")
+    assert 'collect_submodules("arduino_studio")' in spec, \
+        "arduino_studio.spec must collect the package's submodules (the UI is imported lazily)"
+    assert "collect_data_files(\"customtkinter\")" in spec, "CustomTkinter's theme JSON must be bundled"
+    assert "console=False" in spec and "disable_windowed_traceback=False" in spec
+
+    entry = (ROOT / "arduino_studio" / "main.py").read_text(encoding="utf-8")
+    assert "from .ui import create_app" in entry
+    assert "import arduino_studio.ui.app" not in entry, "the entry point must not import Tk eagerly"
+
+    import arduino_studio.ui as ui_pkg
+
+    lazy = getattr(ui_pkg, "_LAZY", {})
+    assert set(lazy) == set(ui_pkg.__all__), "every lazy name must be exported"
+    for module in sorted(set(lazy.values())):
+        assert (ROOT / "arduino_studio" / "ui" / f"{module}.py").is_file(), module
+    assert hasattr(ui_pkg, "__getattr__")
+
+    # the frozen entry point must report failures instead of vanishing quietly
+    from arduino_studio import main as studio_main
+
+    for helper in ("has_console", "notify_user", "write_startup_report"):
+        assert callable(getattr(studio_main, helper)), helper
+    assert studio_main.has_console() in (True, False)
+
+
 def test_examples_are_complete() -> None:
     ids = [example.id for example in ex_mod.EXAMPLES]
     assert "eeprom-string" in ids

@@ -15,6 +15,7 @@ env/
 *.log
 logs/
 arduino_studio/resources/*.ico
+arduino_studio/resources/version_info.txt
 
 # PyInstaller
 *.manifest

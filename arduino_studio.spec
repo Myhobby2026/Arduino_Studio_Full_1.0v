@@ -19,9 +19,16 @@ import os
 import re
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
 
 ROOT = Path(SPECPATH).resolve()  # noqa: F821  (injected by PyInstaller)
+
+# collect_submodules()/collect_data_files() below import the package, which only
+# works when the project root is on sys.path (PyInstaller does not guarantee that).
+import sys  # noqa: E402
+
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 RESOURCES = ROOT / "arduino_studio" / "resources"
 ICON = RESOURCES / "arduino.ico"
 
@@ -43,10 +50,20 @@ def _ensure_version_file() -> str | None:
     best-effort: if anything goes wrong the build simply gets no version info.
     """
     target = RESOURCES / "version_info.txt"
-    if target.is_file():
-        return str(target)
     try:
         number = _app_version()
+    except Exception:  # pragma: no cover - unreadable package metadata
+        return None
+    if target.is_file():
+        cached = target.read_text(encoding="utf-8", errors="replace")
+        if ".".join(str(part) for part in number) in cached:
+            return str(target)  # up to date
+        # a stale file would stamp the new exe with the previous version number
+        try:
+            target.unlink()
+        except OSError:  # pragma: no cover - locked by an editor
+            return str(target)
+    try:
         text = ".".join(str(part) for part in number)
         RESOURCES.mkdir(parents=True, exist_ok=True)
         body = "\n".join([
@@ -95,6 +112,12 @@ datas: list[tuple[str, str]] = []
 # the frozen app raises on ``set_default_color_theme``.
 datas += collect_data_files("customtkinter")
 
+# Arduino Studio's own package data (the window icon, the generated version
+# resource) has to travel with it, because the running app looks for those files
+# relative to ``arduino_studio/__init__.py`` - which inside a bundle is
+# ``sys._MEIPASS/arduino_studio``.
+datas += collect_data_files("arduino_studio")
+
 if ICON.is_file():
     datas.append((str(ICON), "arduino_studio/resources"))
     datas.append((str(ICON), "."))  # the one-file lookup path (sys._MEIPASS)
@@ -103,7 +126,44 @@ binaries: list[tuple[str, str]] = []
 # pyserial loads the platform backend lazily; win32 needs the C extension.
 binaries += collect_dynamic_libs("serial")
 
-hiddenimports = [
+hiddenimports: list[str] = []
+
+# CRITICAL: ``arduino_studio.ui`` resolves its public names lazily through a PEP 562
+# module-level ``__getattr__`` (so that ``--help``/``--check`` never import Tk), which
+# means PyInstaller's static import graph only sees the empty ``ui/__init__.py`` and
+# would ship an exe that dies with "No module named 'arduino_studio.ui.app'".
+# Collecting the package's submodules puts every UI module in the bundle.
+try:
+    hiddenimports += collect_submodules("arduino_studio")
+except Exception as exc:  # pragma: no cover - only if the package is not importable
+    print(f"[spec] collect_submodules('arduino_studio') failed: {exc}")
+    hiddenimports += [
+        "arduino_studio.main",
+        "arduino_studio.ui",
+        "arduino_studio.ui.app",
+        "arduino_studio.ui.theme",
+        "arduino_studio.ui.icons",
+        "arduino_studio.ui.syntax",
+        "arduino_studio.ui.code_editor",
+        "arduino_studio.ui.editor_tabs",
+        "arduino_studio.ui.findbar",
+        "arduino_studio.ui.serial_monitor",
+        "arduino_studio.ui.terminal_panel",
+        "arduino_studio.ui.libraries_panel",
+        "arduino_studio.ui.bootloader_panel",
+        "arduino_studio.ui.settings_view",
+        "arduino_studio.ui.setup_wizard",
+        "arduino_studio.ui.widgets.dialogs",
+        "arduino_studio.ui.widgets.toolbar",
+        "arduino_studio.ui.widgets.explorer",
+        "arduino_studio.ui.widgets.console",
+        "arduino_studio.ui.widgets.text_view",
+        "arduino_studio.ui.widgets.data_table",
+        "arduino_studio.ui.widgets.status_bar",
+        "arduino_studio.ui.widgets.project_dialog",
+    ]
+hiddenimports = list(dict.fromkeys(hiddenimports + [
+    "arduino_studio.core.examples",       # bundled example sketches (data-ish module)
     "serial",
     "serial.serialutil",
     "serial.tools.list_ports",
@@ -118,7 +178,8 @@ hiddenimports = [
     "customtkinter",
     "json",
     "logging.handlers",
-]
+    "typing_extensions",
+]))
 
 for optional in ("send2trash",):  # installed only if you asked for it
     try:
@@ -138,7 +199,6 @@ a = Analysis(
     runtime_hooks=[],
     excludes=[
         "pytest",
-        "unittest",
         "doctest",
         "numpy",
         "pandas",

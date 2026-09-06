@@ -739,9 +739,47 @@ updatable, so the exe finds it on `PATH` or via `Settings` (put
 The window/taskbar icon is generated, not committed:
 
 ```bat
-python tools\make_icon.py                 :: -> arduino_studio\resources\arduino_studio.ico
+python tools\make_icon.py                 :: -> arduino_studio\resources\arduino.ico
 python tools\make_icon.py --png icon.png  :: also dump a 256 px preview
 ```
+
+`arduino_studio.spec` embeds it when the file exists (and the app falls back to
+the stock Tk icon when it does not), so a fresh clone builds fine without
+running the generator first.
+
+### If the .exe does not open
+
+The app is built as a *windowed* executable, so a start-up failure has no
+console to scream into. Since 1.0.1 it never fails silently either:
+
+1. **A dialog appears** (Win32 message box, so it works even when Tk itself is
+   the thing that broke) naming the file it wrote.
+2. **`%APPDATA%\ArduinoStudio\logs\startup_error.log`** holds the traceback,
+   next to the rotating `arduino_studio.log`.
+3. Run it from a terminal to see the exit code and the report::
+
+       cd "dist\Arduino Studio"
+       ".\Arduino Studio.exe" --check
+
+   In a windowed build `--check` writes the same report to
+   `logs\arduino_studio_check.txt` and shows it in a dialog.
+
+The usual causes, in the order they are worth checking:
+
+| Cause | Fix |
+| --- | --- |
+| Only `Arduino Studio.exe` was copied; `_internal\` is missing | copy (or zip) the **whole** `Arduino Studio` folder. |
+| `build_exe.bat` ran with a Python that has no Tkinter (e.g. the Microsoft Store build) | use the python.org installer's `py -3.12`; `build_exe.bat` refuses a Python where `import tkinter` fails. |
+| The bundle missed the lazily-imported UI package (`ModuleNotFoundError: No module named 'arduino_studio.ui.app'`) | rebuild with the current `arduino_studio.spec` — it runs `collect_submodules("arduino_studio")` for exactly this reason. |
+| Antivirus / SmartScreen deleted or blocked the exe | allow the folder, or build with `pyinstaller --onedir` yourself and sign it. |
+| Corrupt profile after an earlier crash | delete `%APPDATA%\ArduinoStudio\settings.json`, or start with `--config-dir` pointing at a scratch folder. |
+
+`build_exe.bat` finishes by running **`tools/check_dist.py`**, which answers this
+question for you instead: does the folder contain an exe of a plausible size, is
+`_internal/` there, did CustomTkinter's theme JSON files get collected, and did
+PyInstaller's own warning file mention a missing `arduino_studio` module? If any
+of that is wrong the script exits non-zero and `build_exe.bat` stops with
+`dist\build_check.txt` explaining what to fix.
 
 `pyproject.toml` metadata (`pip install .`) and `run.py` are kept in sync with the
 packaging spec; `arduino_studio.spec` ignores `tests/`, `docs/` and `build/`.

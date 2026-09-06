@@ -20,6 +20,8 @@ packaged ``ArduinoStudio.exe``.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import logging
 import os
 import platform
@@ -192,6 +194,90 @@ def run_self_check(options: Options) -> int:
 
 
 # ------------------------------------------------------------------- excepthook
+def has_console() -> bool:
+    """False in a windowed (``console=False``) PyInstaller build.
+
+    Such a process has no usable stdout/stderr: writes are dropped, so anything a
+    user needs to see about a start-up failure has to go to a file *and* a dialog.
+    """
+    if bool(getattr(sys, "frozen", False)):
+        return sys.stdout is not None and sys.stderr is not None
+    return sys.stderr is not None
+
+
+def _safe_write(text: str) -> None:
+    """Write to stderr when there is one (never raises)."""
+    stream = sys.stderr
+    if stream is None:
+        return
+    try:
+        stream.write(text)
+        stream.flush()
+    except Exception:  # pragma: no cover - broken/closed handle
+        pass
+
+
+def write_startup_report(log_dir: Path, title: str, detail: str) -> Path:
+    """Write ``startup_error.log`` next to the normal log and return its path.
+
+    Kept separate from ``arduino_studio.log`` because a start-up failure is what
+    support asks for first, and the rotating handler may not even be configured
+    yet when it happens.
+    """
+    target = log_dir / "startup_error.log"
+    try:
+        ensure_parent(target)
+        header = (f"\n{'=' * 72}\n{datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}  "
+                  f"Arduino Studio {__version__}  ({title})\n{'=' * 72}\n")
+        with target.open("a", encoding="utf-8") as handle:
+            handle.write(header + (detail or "").rstrip() + "\n")
+    except OSError:  # pragma: no cover - unwritable profile folder
+        fallback = Path.cwd() / "arduino_studio_startup_error.log"
+        try:
+            fallback.write_text(f"{title}\n\n{detail}\n", encoding="utf-8")
+            target = fallback
+        except OSError:
+            pass
+    return target
+
+
+def notify_user(title: str, message: str, log_file: Optional[Path] = None) -> None:
+    """Show a problem to the user without needing Tk, a console or a log handler.
+
+    Order of preference: the Win32 message box (works even when Tk itself is what
+    failed), then a Tk message box, then stderr, then nothing at all.
+    """
+    text = message if log_file is None else f"{message}\n\nDetails were written to:\n{log_file}"
+    if os.name == "nt":
+        try:  # MB_ICONERROR | MB_SETFOREGROUND
+            import ctypes
+
+            ctypes.windll.user32.MessageBoxW(None, text, title, 0x00000010 | 0x00040000)
+            return
+        except Exception:  # pragma: no cover - no user32 (service session, wine)
+            pass
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror(title, text)
+        root.destroy()
+        return
+    except Exception:  # pragma: no cover - headless, or Tk is what broke
+        pass
+    _safe_write(f"{title}\n\n{text}\n")
+
+
+def ensure_parent(path: Path) -> None:
+    """Create *path*'s parent directory (best effort)."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:  # pragma: no cover - read-only media
+        pass
+
+
 def _install_excepthook(log: logging.Logger) -> None:
     """Log stray exceptions instead of letting Tk die mid-edit.
 
@@ -207,20 +293,45 @@ def _install_excepthook(log: logging.Logger) -> None:
             return
         text = "".join(traceback.format_exception(kind, value, tb))
         log.error("unhandled exception:\n%s", text.rstrip())
-        sys.stderr.write(text)
+        _safe_write(text)
 
     sys.excepthook = hook  # type: ignore[assignment]
 
 
-def _bootstrap_logging(options: Options) -> logging.Logger:
+def _bootstrap_logging(options: Options) -> tuple[logging.Logger, SettingsStore]:
     """Configure logging before any window exists (so start-up crashes are logged)."""
     store = SettingsStore(options.config_dir)
     level = getattr(logging, str(options.log_level).upper(), logging.INFO)
     setup_logging(log_dir=store.log_dir, level=int(level))
-    return get_logger("main")
+    return get_logger("main"), store
 
 
 # ------------------------------------------------------------------------- main
+def _run_check_report(options: Options, store: SettingsStore) -> int:
+    """``--check`` that also works when the process has no console.
+
+    A windowed PyInstaller build has no stdout, so ``Arduino Studio.exe --check``
+    would appear to do nothing; the report is therefore captured and both saved
+    next to the log file and shown in a dialog.
+    """
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        code = run_self_check(options)
+    report = buffer.getvalue() or "no output"
+    target = store.log_dir / "arduino_studio_check.txt"
+    try:
+        ensure_parent(target)
+        target.write_text(report, encoding="utf-8")
+    except OSError:  # pragma: no cover - unwritable folder
+        target = Path("arduino_studio_check.txt")
+        try:
+            target.write_text(report, encoding="utf-8")
+        except OSError:  # pragma: no cover
+            target = store.log_dir / "arduino_studio_check.txt"
+    notify_user(f"Arduino Studio self-check (exit {code})", report.strip()[-2400:], target)
+    return code
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     """Entry point: parse the command line, start the GUI, return an exit code."""
     try:
@@ -232,11 +343,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"Arduino Studio {__version__}")
         return 0
 
-    log = _bootstrap_logging(options)
+    log, store = _bootstrap_logging(options)
     _install_excepthook(log)
 
     if options.check:
-        return run_self_check(options)
+        return _run_check_report(options, store)
 
     if options.new_project and not options.project:
         options = _create_requested_project(options, log)
@@ -252,9 +363,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         from .ui import create_app  # imported late: only the GUI needs Tk
     except Exception as exc:  # pragma: no cover - broken toolkit install
         log.exception("could not import the user interface")
-        print(f"Arduino Studio could not start its interface: {exc}", file=sys.stderr)
-        print("On Linux the Tkinter package is separate: sudo apt install python3-tk", file=sys.stderr)
-        print("Also check 'python -m arduino_studio --check'.", file=sys.stderr)
+        hint = ("On Linux the Tkinter package is separate: sudo apt install python3-tk.\n"
+                "Run 'python -m arduino_studio --check' for a quick diagnosis.")
+        if getattr(sys, "frozen", False):
+            hint = ("This is the packaged build, so a missing module usually means the PyInstaller "
+                    "bundle did not collect arduino_studio.ui.* - re-run build_exe.bat with the "
+                    "current arduino_studio.spec.\n" + hint)
+        message = (f"Arduino Studio could not start its interface:\n\n{type(exc).__name__}: {exc}\n\n{hint}")
+        report = write_startup_report(store.log_dir, "interface import failed", traceback.format_exc())
+        _safe_write(message + "\n")
+        notify_user("Arduino Studio could not start", message, report)
         return 1
 
     started = datetime.now()
@@ -317,23 +435,15 @@ def _create_requested_project(options: Options, log: logging.Logger) -> Options:
 
 def _report_crash(exc: BaseException, log: logging.Logger, *, log_file: Path) -> None:
     """Best effort "the app died" message that does not need a working GUI."""
+    detail = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
     message = (
         "Arduino Studio stopped unexpectedly.\n\n"
         f"{type(exc).__name__}: {exc}\n\n"
-        f"A full traceback was written to\n{log_file}\n\n"
         "Run 'python -m arduino_studio --check' for a quick diagnosis."
     )
-    print(message, file=sys.stderr)
-    try:  # a dialog is nicer when there is a desktop session to show it in
-        import tkinter as tk
-        from tkinter import messagebox
-
-        root = tk.Tk()
-        root.withdraw()
-        messagebox.showerror("Arduino Studio", message)
-        root.destroy()
-    except Exception:  # pragma: no cover - headless, or Tk is what broke
-        pass
+    write_startup_report(log_file.parent, "fatal error", f"{message}\n\n{detail}")
+    _safe_write(message + "\n" + detail)
+    notify_user("Arduino Studio stopped", message, log_file)
 
 
 def store_log_path(options: Options) -> Path:
