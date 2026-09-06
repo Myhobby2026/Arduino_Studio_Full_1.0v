@@ -691,11 +691,14 @@ line. Cancellations are recorded as cancelled, not as errors.
 ## Running the tests and the self-check
 
 ```bat
-python tests/test_core_flow.py     :: 22 tests: projects, settings, CLI argv shapes,
+python tests/test_core_flow.py     :: 24 tests: projects, settings, CLI argv shapes,
                                      diagnostics, libraries, bootloader, serial,
                                      terminal, threading, process layer, examples
-python tests/test_ui_smoke.py      :: 16 tests: every panel/dialog, driven against a
-                                     Tk stub so they run headless
+python tests/test_ui_smoke.py      :: 20 tests: every panel/dialog, driven against a
+                                     Tk stub so they run headless; the stub rejects
+                                     widget options the real interpreter would reject.
+                                     Pass name fragments (python tests/test_ui_smoke.py
+                                     explorer serial) to run a subset
 python -m arduino_studio --check   :: headless support report - settings/log/data
                                      paths, arduino-cli version + data dir,
                                      pyserial, tkinter (Tk/Tcl versions),
@@ -772,20 +775,25 @@ The usual causes, in the order they are worth checking:
 | `build_exe.bat` ran with a Python that has no Tkinter (e.g. the Microsoft Store build) | use the python.org installer's `py -3.12`; `build_exe.bat` refuses a Python where `import tkinter` fails. |
 | The bundle missed the lazily-imported UI package (`ModuleNotFoundError: No module named 'arduino_studio.ui.app'`) | rebuild with the current `arduino_studio.spec` — it runs `collect_submodules("arduino_studio")` for exactly this reason. |
 | The UI passes a widget option CustomTkinter does not know (e.g. `CTkButton(..., padx=12)`) — it raises `ValueError: ['padx'] are not supported arguments` while the window is being built | run `python tools\check_ctk_kwargs.py`; Tk-only options belong on `.grid()`/`.pack()`, not on the widget. `build_exe.bat` runs this check before PyInstaller starts. |
+| A Tk option name is misspelled (e.g. `Treeview.column(min_width=...)` where ttk calls it `minwidth`) — it raises `TclError: unknown option "-min_width"` while the window is being built, so the exe opens and closes again | run `python tools\check_ctk_kwargs.py`; it checks every `grid`/`pack`/`place`, `Treeview.column`/`heading` and `Menu.add_*` option name against `tests/tk_options.py`, and `tests/tkstub.py` rejects the same names at run time. |
 | Antivirus / SmartScreen deleted or blocked the exe | allow the folder, or build with `pyinstaller --onedir` yourself and sign it. |
 | Corrupt profile after an earlier crash | delete `%APPDATA%\ArduinoStudio\settings.json`, or start with `--config-dir` pointing at a scratch folder. |
 
-Two checks wrap the build so a broken bundle never reaches you:
-**`tools/check_ctk_kwargs.py`** validates every `ctk.CTk*` constructor and
-`.configure()` keyword against the CustomTkinter that is installed (its options are
-not Tk's options), and **`tools/check_dist.py`** validates the result: does the
-folder contain an exe of a plausible size, is `_internal/` there, did CustomTkinter's
-theme JSON get collected, and did PyInstaller's own warning file mention a missing
-`arduino_studio` module? does the folder contain an exe of a plausible size, is
-`_internal/` there, did CustomTkinter's theme JSON files get collected, and did
-PyInstaller's own warning file mention a missing `arduino_studio` module? If any
-of that is wrong the script exits non-zero and `build_exe.bat` stops with
+Two checks wrap the build so a broken bundle never reaches you.
+**`tools/check_ctk_kwargs.py`** validates the widget options the UI asks for: every
+`ctk.CTk*` constructor and `.configure()` keyword against the CustomTkinter that is
+actually installed (its options are *not* Tk's options), plus every
+`grid`/`pack`/`place`, `Treeview.column`/`heading` and `Menu.add_*` option name against
+the tables in `tests/tk_options.py`. **`tools/check_dist.py`** validates the result: an
+exe of a plausible size, `_internal/` present, CustomTkinter's theme JSON collected, and
+no "missing module named arduino_studio…" in PyInstaller's own warning file. If any of
+that is wrong the script exits non-zero and `build_exe.bat` stops with
 `dist\build_check.txt` explaining what to fix.
+
+Both checks are also tests: `tests/test_ui_smoke.py` runs the option scan and
+`tests/tkstub.py` raises `TclError` for an option the real interpreter would reject, so
+a typo fails in the repository instead of on someone's desktop. Run them directly with
+`python tests\test_ui_smoke.py` and `python tests\test_core_flow.py`.
 
 `pyproject.toml` metadata (`pip install .`) and `run.py` are kept in sync with the
 packaging spec; `arduino_studio.spec` ignores `tests/`, `docs/` and `build/`.

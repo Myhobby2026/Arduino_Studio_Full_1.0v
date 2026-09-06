@@ -23,6 +23,7 @@ from __future__ import annotations
 import inspect
 import itertools
 import re
+import os
 import sys
 import types
 from pathlib import Path
@@ -36,6 +37,32 @@ _counter = itertools.count(1)
 
 #: every key sequence bound on any stubbed widget (used to verify menu accelerators)
 BOUND_SEQUENCES: list[str] = []
+
+try:  # optional run-time validation of Tk option names (see tk_options.py)
+    from tk_options import describe as _describe_options
+except ImportError:  # pragma: no cover - imported as part of a package
+    try:
+        from .tk_options import describe as _describe_options  # type: ignore[attr-defined]
+    except Exception:
+        _describe_options = None  # type: ignore[assignment]
+
+
+def _check_options(command: str, kwargs: dict[str, Any], receiver: str = "") -> None:
+    """Raise ``TclError`` for options that the real Tk interpreter would reject.
+
+    Without this the stub accepts anything, which is how ``Treeview.column(
+    min_width=...)`` got as far as a packaged build and looked like "Arduino
+    Studio.exe will not open".
+    """
+    if _describe_options is None or not kwargs:
+        return
+    message = _describe_options(command, [key for key in kwargs if key], receiver)
+    if not message:
+        return
+    if os.environ.get("ARDUINO_STUDIO_TK_OPTION_WARNINGS"):  # debug mode: only report
+        print(f"[tk-option] {receiver or '?'} {command}(): {message}", file=sys.stderr)
+        return
+    raise TclError(message)
 
 
 def bound_sequences() -> set[str]:
@@ -302,12 +329,15 @@ class _Widget:
 
     # ---- geometry (no-ops)
     def pack(self, **kwargs: Any) -> None:
+        _check_options("pack", kwargs, type(self).__name__.lower())
         self._options["_packed"] = kwargs
 
     def grid(self, **kwargs: Any) -> None:
+        _check_options("grid", kwargs, type(self).__name__.lower())
         self._options["_gridded"] = kwargs
 
     def place(self, **kwargs: Any) -> None:
+        _check_options("place", kwargs, type(self).__name__.lower())
         self._options["_placed"] = kwargs
 
     def pack_forget(self) -> None:
@@ -1049,6 +1079,8 @@ class Text(_Widget):
         return tuple(out)
 
     def tag_configure(self, tagName: Any = None, cnf: Any = None, **kwargs: Any) -> Any:
+        _check_options("tag_configure", {**(cnf or {}), **kwargs},
+                       type(self).__name__.lower() or "text")
         if tagName is None:
             return {key: dict(value) for key, value in self._tag_options.items()}
         if cnf is None and not kwargs:
@@ -1243,6 +1275,7 @@ class Canvas(_Widget):
         return self._create("oval", *args, **kwargs)
 
     def itemconfigure(self, tagOrId: Any, cnf: Any = None, **kwargs: Any) -> Any:
+        _check_options("itemconfigure", {**(cnf or {}), **kwargs}, type(self).__name__.lower())
         if cnf is None and not kwargs:
             return {}
         item = self._items.get(int(tagOrId) if str(tagOrId).isdigit() else 0)
@@ -1366,6 +1399,9 @@ class Menu(_Widget):
         self.entries: list[dict[str, Any]] = []
 
     def add(self, kind: str, cnf: Optional[dict[str, Any]] = None, **kwargs: Any) -> int:
+        merged = dict(cnf or {})
+        merged.update(kwargs)
+        _check_options(f"add_{kind}" if not str(kind).startswith("add_") else str(kind), merged, "menu")
         entry = {"kind": kind}
         entry.update(cnf or {})
         entry.update(kwargs)
@@ -1642,6 +1678,7 @@ class Treeview(_TtkWidget):
 
     # ---- model
     def insert(self, parent: Any = "", index: Any = "end", iid: Any = None, **kwargs: Any) -> str:
+        _check_options("insert", kwargs, "tree")
         parent = "" if parent is None else str(parent)
         if parent not in self._nodes:
             parent = ""
@@ -1677,6 +1714,7 @@ class Treeview(_TtkWidget):
                 self._selection.remove(str(item))
 
     def item(self, item: Any, option: Any = None, value: Any = None, **kwargs: Any) -> Any:
+        _check_options("item", kwargs, "tree")
         node = self._nodes.get(str(item))
         if node is None:
             return {} if option is None else ""
@@ -1771,6 +1809,7 @@ class Treeview(_TtkWidget):
 
     # ---- view
     def heading(self, column: Any, option: Any = None, **kwargs: Any) -> Any:
+        _check_options("heading", kwargs, "tree")
         key = f"heading:{column}:{option}"
         if option is None and not kwargs:
             return {"text": self._options.get(f"heading:{column}", ""), "command": None}
@@ -1783,6 +1822,7 @@ class Treeview(_TtkWidget):
         return None
 
     def column(self, column: Any = None, option: Any = None, **kwargs: Any) -> Any:
+        _check_options("column", kwargs, "tree")
         if column is None:
             return {}
         if option is None and not kwargs:

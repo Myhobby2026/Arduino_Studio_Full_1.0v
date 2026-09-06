@@ -137,7 +137,8 @@ class ProjectExplorer(ctk.CTkFrame):
 
         self.tree = ttk.Treeview(body, show="tree", selectmode="browse", style="Studio.Treeview",
                                  height=18, takefocus=1)
-        self.tree.column("#0", width=220, min_width=120, anchor="w", stretch=True)
+        # ttk calls this option "minwidth"; "min_width" is a TclError at run time
+        self.tree.column("#0", width=220, minwidth=120, anchor="w", stretch=True)
         self.tree_scroll = ctk.CTkScrollbar(body, command=self.tree.yview)
         self.tree.configure(yscrollcommand=self.tree_scroll.set)
         self.tree.grid(row=0, column=0, sticky="nsew", padx=(4, 0), pady=3)

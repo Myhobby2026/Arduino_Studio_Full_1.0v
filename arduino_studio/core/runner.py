@@ -317,13 +317,21 @@ class TaskRunner:
                 count += 1
         return count
 
+    def active_handles(self, lane: Optional[str] = None) -> "list[TaskHandle]":
+        """The running/queued handles, optionally limited to one *lane*.
+
+        Handy for diagnostics: the UI smoke test reports the names of whatever
+        survived shutdown instead of only asserting that nothing did.
+        """
+        with self._thread_lock:
+            active = [handle for handle in self._active.values() if not handle.is_done]
+        if lane is None:
+            return active
+        return [handle for handle in active if handle.lane == lane]
+
     def busy(self, lane: Optional[str] = None) -> bool:
         """True while any (or any *lane*-restricted) task is running/queued."""
-        with self._thread_lock:
-            active = [h for h in self._active.values() if not h.is_done]
-        if lane is None:
-            return bool(active)
-        return any(h.lane == lane for h in active)
+        return bool(self.active_handles(lane))
 
     def current(self, lane: str = LANE_BUILD) -> Optional[TaskHandle]:
         """The running/queued handle of *lane* (oldest first), if any."""

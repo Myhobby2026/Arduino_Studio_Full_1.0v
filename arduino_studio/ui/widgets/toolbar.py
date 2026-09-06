@@ -135,7 +135,9 @@ class Toolbar(ctk.CTkFrame):
             font=(palette.font_family, 11, "bold"),
             command=lambda: self._invoke(action),
         )
-        button.grid(row=0, column=column, sticky="w", padx=(4, 0), pady=6)
+        # CTkButton has no padx of its own (that option lives on the geometry
+        # manager), so the spacing between the accent pair is set here.
+        button.grid(row=0, column=column, sticky="w", padx=(6, 2), pady=6)
         return button
 
     def _selector(self, column: int, label: str, values: Iterable[str],

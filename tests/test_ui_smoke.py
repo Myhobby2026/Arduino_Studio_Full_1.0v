@@ -681,7 +681,8 @@ def test_app_flow() -> None:
 
         app.terminal_panel.stop()
         app.quit_app()
-        assert not app.runner.busy(), "quit must drain the task runner"
+        stuck = [handle.name for handle in app.runner.active_handles() if not handle.is_done]
+        assert not app.runner.busy(), f"quit must drain the task runner (still busy: {stuck})"
         saved = json.loads((config / "settings.json").read_text(encoding="utf-8"))
         assert saved["first_run_completed"] is True
         assert saved["fqbn"] == "arduino:avr:nano"
@@ -859,12 +860,52 @@ def test_customtkinter_widget_options_are_supported() -> None:
         "unsupported CustomTkinter option(s); the widget constructor will raise:\n"
         + "\n".join(lines[:12])
     )
+    tk_problems, tk_lines = check_ctk_kwargs.tk_option_problems(ROOT / "arduino_studio")
+    assert tk_problems == 0, (
+        "misspelled Tk option(s); the interpreter raises TclError while the "
+        "window is built:\n" + "\n".join(tk_lines[:12])
+    )
+
+
+def test_stub_rejects_unknown_tk_options() -> None:
+    """The stub must complain exactly when real Tk does, otherwise every widget
+    option typo in the app is invisible until someone double-clicks the exe.
+    """
+    import tkinter.ttk as ttk
+    from tk_options import GRID, describe, unsupported
+
+    tree = ttk.Treeview(tkstub.ROOT, columns=("a",))
+    try:
+        tree.column("#0", width=100, minwidth=40)
+    except Exception as exc:  # noqa: BLE001 - the whole point
+        raise AssertionError(f"a valid Treeview.column() call was rejected: {exc}") from None
+    try:
+        tree.column("#0", min_width=40)
+    except tkstub.TclError as exc:
+        assert "min_width" in str(exc), str(exc)
+    else:
+        raise AssertionError("the stub accepted min_width - real Tk raises TclError for it")
+
+    frame = ttk.Frame(tkstub.ROOT)
+    try:
+        frame.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=2, pady=(2, 4))
+    except Exception as exc:  # noqa: BLE001
+        raise AssertionError(f"a valid grid() call was rejected: {exc}") from None
+    assert unsupported("grid", ["min_width", "row"], "frame") == ["min_width"], "table drift"
+    assert GRID <= {"row", "column", "sticky", "padx", "pady", "ipadx", "ipady",
+                    "columnspan", "rowspan", "in"}
+    assert describe("grid", ["row"], "frame") == ""
 
 
 def main() -> int:
     """Run every ``test_*`` function and report failures (pytest-free mode)."""
+    wanted = [arg.lower() for arg in sys.argv[1:] if not arg.startswith("-")]
     tests = [(name, obj) for name, obj in sorted(globals().items())
-             if name.startswith("test_") and callable(obj)]
+             if name.startswith("test_") and callable(obj)
+             and (not wanted or any(needle in name.lower() for needle in wanted))]
+    if not tests:
+        print(f"no test matched {wanted}")
+        return 1
     failures = 0
     for name, function in tests:
         try:

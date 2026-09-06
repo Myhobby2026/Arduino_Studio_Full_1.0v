@@ -92,6 +92,7 @@ class BootloaderPanel(ctk.CTkFrame):
         self._busy = False
         self._last_chip_info: Optional[ChipInfo] = None
 
+        self._refreshing = False
         self._build()
         self.reload_capabilities()
 
@@ -419,7 +420,25 @@ class BootloaderPanel(ctk.CTkFrame):
         self._sync_state()
 
     def refresh_from_app(self) -> None:
-        """Called whenever the panel is shown or the board / port changes."""
+        """Called whenever the panel is shown or the board / port changes.
+
+        Re-entrant by accident: writing a menu value fires that menu's
+        ``command``, and the command lands back here again.  Without the flag
+        below, a board whose chip is known (any Uno/Nano/Mega) produced an
+        endless ``refresh_from_app`` / ``_chip_chosen`` ping-pong - a
+        ``RecursionError`` raised while the window was being built, which in a
+        windowed executable reads as "Arduino Studio will not open".
+        """
+        if getattr(self, "_refreshing", False):
+            return
+        self._refreshing = True
+        try:
+            self._refresh_now()
+        finally:
+            self._refreshing = False
+
+    def _refresh_now(self) -> None:
+        """Body of :meth:`refresh_from_app`, run once per public call."""
         board = self._fqbn()
         try:
             self.board_label.configure(text=board or "no board selected")
@@ -447,7 +466,7 @@ class BootloaderPanel(ctk.CTkFrame):
                     self.chip_menu.set(chip)
             except tk.TclError:  # pragma: no cover
                 pass
-            self._chip_chosen(chip)
+            self._chip_chosen(chip, reload_ports=False)
         self._build_board_menus(board)
         self._sync_state()
 

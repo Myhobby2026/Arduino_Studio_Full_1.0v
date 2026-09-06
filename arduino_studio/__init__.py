@@ -16,7 +16,7 @@ The package is split into three layers:
 
 from __future__ import annotations
 
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 __app_name__ = "Arduino Studio"
 
 __all__ = ["__version__", "__app_name__"]

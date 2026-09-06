@@ -2896,14 +2896,18 @@ class ArduinoStudioApp(ctk.CTk):
             self.store.save()
         except Exception:  # pragma: no cover
             self._log.exception("settings could not be saved on exit")
+        # A query-lane task (the port scan in particular) is not cancelled by
+        # shutdown(), it simply outlives the window and then reports into
+        # widgets that no longer exist.  Give it a bounded moment to finish,
+        # then stop the runner; the timeout keeps a stubborn subprocess from
+        # turning "quit" into a hang.
         try:
-            self.runner.shutdown(wait=True, timeout=2.0)
-        except TypeError:  # pragma: no cover - older signature
-            try:
-                self.runner.shutdown()
-            except Exception:
-                pass
-        except Exception:  # pragma: no cover
+            self.runner.wait_all(timeout=2.0)
+        except Exception:  # pragma: no cover - defensive
+            self._log.debug("waiting for background tasks raised", exc_info=True)
+        try:
+            self.runner.shutdown()
+        except Exception:  # pragma: no cover - defensive
             self._log.debug("runner shutdown raised", exc_info=True)
         for ident in self._timers:
             try:

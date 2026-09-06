@@ -186,6 +186,80 @@ def check(root: pathlib.Path, package: pathlib.Path, *, verbose: bool = False) -
     return problems, lines
 
 
+#: Tk commands whose accepted options are fixed by Tk itself rather than by a
+#: widget class, with the receiver name ``tests/tk_options.py`` expects.
+TK_COMMANDS = {"grid": "grid", "pack": "pack", "place": "place",
+               "column": "column", "heading": "heading",
+               "add_command": "add_command", "add_cascade": "add_cascade",
+               "add_separator": "add_separator", "add_checkbutton": "add_checkbutton",
+               "add_radiobutton": "add_radiobutton"}
+
+#: the widget kind each command belongs to (``tests/tk_options.py`` vocabulary);
+#: grid/pack/place are Tk-wide, so they need no receiver.
+TK_RECEIVERS = {"column": "tree", "heading": "tree", "add_command": "menu",
+                "add_cascade": "menu", "add_separator": "menu",
+                "add_checkbutton": "menu", "add_radiobutton": "menu"}
+
+
+def tk_option_problems(scan_dir: pathlib.Path, tests_dir: Optional[pathlib.Path] = None, *,
+                       verbose: bool = False) -> tuple[int, list[str]]:
+    """Report misspelled Tk options such as ``Treeview.column(min_width=...)``.
+
+    Tk validates those names inside the interpreter, so a typo is not a Python
+    error: the widget call raises ``TclError: unknown option "-min_width"``
+    while the main window is being built, which in a windowed executable reads
+    as "the app will not open".  ``tests/tk_options.py`` holds the option
+    tables; the Tk stub used by the test suite enforces them at run time, this
+    function catches them without launching any UI.
+    """
+    scan_dir = pathlib.Path(scan_dir).resolve()
+    repo_root = scan_dir.parent
+    search = [pathlib.Path(tests_dir)] if tests_dir else [repo_root / "tests",
+                                                          pathlib.Path(__file__).resolve().parent.parent / "tests"]
+    describe = None
+    for folder in search:
+        if (folder / "tk_options.py").is_file():
+            if str(folder) not in sys.path:
+                sys.path.insert(0, str(folder))
+            try:
+                from tk_options import describe as describe, unsupported  # type: ignore[no-redef]
+            except Exception:  # pragma: no cover - defensive
+                describe = None
+            break
+    if describe is None:
+        return 1, ["  FAIL tests/tk_options.py not found - cannot check Tk option names"]
+
+    problems = 0
+    lines: list[str] = []
+    for path in sorted(scan_dir.rglob("*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError) as exc:  # pragma: no cover - defensive
+            problems += 1
+            lines.append(f"  FAIL {path}: cannot parse ({exc})")
+            continue
+        relative = path.relative_to(repo_root).as_posix() if path.is_relative_to(repo_root) else path.name
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            command = TK_COMMANDS.get(node.func.attr)
+            if command is None or not node.keywords:
+                continue
+            receiver = TK_RECEIVERS.get(node.func.attr, "")
+            names = [str(keyword.arg) for keyword in node.keywords if keyword.arg]
+            if any(keyword.arg is None for keyword in node.keywords):
+                continue  # **kwargs - we cannot know what it expands to
+            bad = unsupported(command, names, receiver)
+            if not bad:
+                continue
+            problems += len(bad)
+            lines.append(f"  FAIL {relative}:{node.lineno}: {node.func.attr}() - "
+                        f"{describe(command, bad[:1], receiver)}")
+    if verbose and not problems:
+        lines.append("  ok   Tk geometry/Treeview/Menu option names are spelled correctly")
+    return problems, lines
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     """Command line entry point."""
     parser = argparse.ArgumentParser(description="verify CustomTkinter widget keyword arguments")
@@ -197,9 +271,11 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     package = customtkinter_root()
     if package is None:
-        print("customtkinter is not installed here - nothing to check (skipping).")
-        return 0
-    problems, lines = check(pathlib.Path(args.package_root), package, verbose=bool(args.verbose))
+        print("customtkinter is not installed here - skipping that part "
+              "(the Tk option scan below still runs).")
+        problems, lines = 0, []
+    else:
+        problems, lines = check(pathlib.Path(args.package_root), package, verbose=bool(args.verbose))
     print(f"CustomTkinter option check - {package.parent.name}/{package.name}")
     for line in lines or ["  ok   every ctk.CTk* keyword argument is supported"]:
         print(line)
@@ -208,6 +284,16 @@ def main(argv: Optional[list[str]] = None) -> int:
               "when the widget is built.")
         return 1
     print("RESULT: the UI only passes options the installed CustomTkinter accepts.")
+
+    tk_problems, tk_lines = tk_option_problems(pathlib.Path(args.package_root),
+                                              verbose=bool(args.verbose))
+    print("\nTk option check (grid/pack/place, Treeview.column/heading, Menu.add_*)")
+    for line in tk_lines or ["  ok   every Tk option name is one the interpreter knows"]:
+        print(line)
+    if tk_problems:
+        print(f"RESULT: {tk_problems} misspelled Tk option(s) - TclError at run time.")
+        return 1
+    print("RESULT: Tk option names are valid too.")
     return 0
 
 

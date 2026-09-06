@@ -67,10 +67,10 @@ if not exist "arduino_studio\resources\arduino.ico" (
     echo     note: no icon generated, the build will use the default one.
 )
 
-echo --- checking CustomTkinter widget options
+echo --- checking CustomTkinter and Tk widget options
 "%VENV_PY%" tools\check_ctk_kwargs.py
 if errorlevel 1 (
-    echo ERROR: the UI passes widget options CustomTkinter does not support.
+    echo ERROR: the UI passes widget options that CustomTkinter or Tk does not support.
     echo        Those raise while the window is being built, so the exe would
     echo        start and close again. Fix the lines listed above first.
     pause
