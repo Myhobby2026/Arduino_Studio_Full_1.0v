@@ -400,6 +400,7 @@ class CodeEditor(ctk.CTkFrame):
             ("<Control-Home>", lambda: (self.text.mark_set("insert", "1.0"), self._schedule_cursor_work(), "break")[2]),
             ("<Control-End>", lambda: (self.text.mark_set("insert", "end-1c"), self._schedule_cursor_work(), "break")[2]),
             ("<Control-bracketleft>", self.jump_matching_bracket),
+            ("<Control-bracketright>", self.jump_matching_bracket),
             ("<Alt-Up>", lambda: self.move_line(-1)),
             ("<Alt-Down>", lambda: self.move_line(1)),
             ("<Shift-Alt-Up>", lambda: self.duplicate_line(direction=-1)),
@@ -412,6 +413,7 @@ class CodeEditor(ctk.CTkFrame):
             ("<F2>", lambda: "break" if self._goto_next_error(1) else ""),
             ("<Shift-F2>", lambda: "break" if self._goto_next_error(-1) else ""),
             ("<Control+KP_Add>", lambda: self._zoom_font(1)),
+            ("<Control-plus>", lambda: self._zoom_font(1)),
             ("<Control+KP_Subtract>", lambda: self._zoom_font(-1)),
             ("<Control-minus>", lambda: self._zoom_font(-1)),
             ("<Control-equal>", lambda: self._zoom_font(1)),
@@ -1238,6 +1240,14 @@ class CodeEditor(ctk.CTkFrame):
         diag = self.document.diagnostics[position]
         self._current_error_index = position
         return self.goto_line(diag.line or 1, column=max(0, diag.column - 1))
+
+    def next_error(self, event: Any = None) -> str:
+        """Jump the caret to the next diagnostic from the last build (F2)."""
+        return "break" if self._goto_next_error(1) else ""
+
+    def previous_error(self, event: Any = None) -> str:
+        """Jump the caret to the previous diagnostic from the last build (Shift+F2)."""
+        return "break" if self._goto_next_error(-1) else ""
 
     def _goto_next_error(self, step: int) -> bool:
         if not self.document.diagnostics:

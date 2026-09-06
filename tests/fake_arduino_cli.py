@@ -330,6 +330,14 @@ def cmd_lib(args: argparse.Namespace) -> int:
         return 0
     if action in ("install", "uninstall", "download"):
         names = list(args.LIBRARY_NAMEs or [])
+        if (args.zip_path or args.git_url) and not _config_bool("library.enable_unsafe_install"):
+            # mirrors arduino-cli: unsafe installs must be enabled in the config first
+            refuse = ("installing from a ZIP archive or a Git URL is an unsafe operation that is not "
+                      "allowed; set 'library.enable_unsafe_install: true' in the arduino-cli "
+                      "configuration to allow unsafe installs")
+            _emit({"error": refuse}, [f"error: {refuse}"], args.format_json)
+            print(f"error: {refuse}", file=sys.stderr)
+            return 1
         if args.zip_path:
             archive = Path(args.zip_path)
             if not archive.is_file():
@@ -381,7 +389,48 @@ def cmd_core(args: argparse.Namespace) -> int:
     return 2
 
 
+def _config_path() -> Path:
+    return _state_dir() / "config.json"
+
+
+def _config_values() -> dict:
+    try:
+        return json.loads(_config_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _config_bool(key: str, default: bool = False) -> bool:
+    value = _config_values().get(key, default)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
 def cmd_config(args: argparse.Namespace) -> int:
+    action = getattr(args, "config_action", "")
+    rest = [str(item) for item in (args.rest or [])]
+    if action == "set":
+        if len(rest) < 2:
+            print("error: config set needs a KEY and a VALUE", file=sys.stderr)
+            return 2
+        values = _config_values()
+        values[rest[0]] = rest[1]
+        _config_path().write_text(json.dumps(values, indent=2), encoding="utf-8")
+        _emit({"result": "Config value written successfully"},
+              [f"Config value written successfully. ({rest[0]}={rest[1]})"], args.format_json)
+        return 0
+    if action == "add":
+        values = _config_values()
+        key = rest[0] if rest else "board_manager.additional_urls"
+        current = [str(item) for item in values.get(key, [])]
+        current.extend(item for item in rest[1:] if item not in current)
+        values[key] = current
+        _config_path().write_text(json.dumps(values, indent=2), encoding="utf-8")
+        _emit({"result": "Config value added successfully."}, ["Config value added successfully."],
+              args.format_json)
+        return 0
+    stored = _config_values()
     payload = {
         "board_manager": {"additional_indexes": [
             "https://espressif.github.io/arduino-esp32/package_esp32_index.json"]},
@@ -389,6 +438,12 @@ def cmd_config(args: argparse.Namespace) -> int:
         "daemon": {"enable_mdns": False},
         "logging": {"level": "info"},
     }
+    for key, value in stored.items():
+        if "." in key:
+            head, _, tail = key.rpartition(".")
+            node = payload.setdefault(head, {})
+            if isinstance(node, dict):
+                node[tail] = value
     _emit(payload, [f"config {args.config_action}: ok"], args.format_json)
     return 0
 

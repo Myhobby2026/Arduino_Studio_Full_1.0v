@@ -69,9 +69,9 @@ class Toolbar(ctk.CTkFrame):
         self._separator(column)
         column += 1
         self.verify_button = self._accent_button(column, "verify", "verify",
-                                                 "Verify / compile  (Ctrl+Shift+R)")
+                                                 "Verify / compile  (Ctrl+R, clean rebuild Ctrl+Shift+R)")
         column += 1
-        self.upload_button = self._accent_button(column, "upload", "upload", "Upload to board  (Ctrl+Shift+U)")
+        self.upload_button = self._accent_button(column, "upload", "upload", "Upload to board  (Ctrl+U, via programmer Ctrl+Shift+U)")
         column += 1
         self._separator(column)
         column += 1
@@ -92,7 +92,7 @@ class Toolbar(ctk.CTkFrame):
         self._separator(column)
         column += 1
 
-        self.serial_button = self._button(column, "serial", "serial", "Open the Serial Monitor  (Ctrl+Shift+M)")
+        self.serial_button = self._button(column, "serial", "serial", "Open the Serial Monitor  (Ctrl+M)")
         column += 1
         self.libraries_button = self._button(column, "libraries", "libraries",
                                              "Manage Arduino libraries  (Ctrl+Shift+L)")

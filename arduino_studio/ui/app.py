@@ -540,6 +540,7 @@ class ArduinoStudioApp(ctk.CTk):
         file_menu.add_command(label="Save", command=self.save, accelerator="Ctrl+S")
         file_menu.add_command(label="Save All", command=self.save_all, accelerator="Ctrl+Shift+S")
         file_menu.add_command(label="Close Project", command=self.close_project)
+        file_menu.add_command(label="Close Tab", command=self.close_tab, accelerator="Ctrl+W")
         file_menu.add_separator()
         file_menu.add_command(label="Rename Project…", command=lambda: self._project_action("rename"))
         file_menu.add_command(label="Duplicate Project…", command=lambda: self._project_action("duplicate"))
@@ -570,7 +571,11 @@ class ArduinoStudioApp(ctk.CTk):
         edit_menu.add_command(label="Indent", command=lambda: self._editor_action("indent"), accelerator="Tab")
         edit_menu.add_command(label="Outdent", command=lambda: self._editor_action("outdent"), accelerator="Shift+Tab")
         edit_menu.add_command(label="Go to Matching Bracket", command=lambda: self._editor_action("bracket"),
-                             accelerator="Ctrl+]")
+                             accelerator="Ctrl+[")
+        edit_menu.add_command(label="Next Error", command=lambda: self._editor_action("next_error"),
+                             accelerator="F2")
+        edit_menu.add_command(label="Previous Error", command=lambda: self._editor_action("prev_error"),
+                             accelerator="Shift+F2")
         edit_menu.add_command(label="Go to Line…", command=self.goto_line, accelerator="Ctrl+G")
         menubar.add_cascade(label="Edit", menu=edit_menu)
 
@@ -578,7 +583,8 @@ class ArduinoStudioApp(ctk.CTk):
         sketch_menu.add_command(label="Verify", command=self.verify, accelerator="Ctrl+R")
         sketch_menu.add_command(label="Verify (Clean Build)", command=self.verify_clean, accelerator="Ctrl+Shift+R")
         sketch_menu.add_command(label="Upload", command=self.upload, accelerator="Ctrl+U")
-        sketch_menu.add_command(label="Upload Using Programmer", command=self.upload_programmer)
+        sketch_menu.add_command(label="Upload Using Programmer", command=self.upload_programmer,
+                                accelerator="Ctrl+Shift+U")
         sketch_menu.add_separator()
         sketch_menu.add_command(label="Export Compiled Binary", command=self.export_binaries)
         sketch_menu.add_command(label="Show Build Folder", command=lambda: self._project_action("build_folder"))
@@ -622,7 +628,10 @@ class ArduinoStudioApp(ctk.CTk):
         view_menu.add_separator()
         view_menu.add_command(label="Zoom In", command=lambda: self._zoom_editor(1), accelerator="Ctrl++")
         view_menu.add_command(label="Zoom Out", command=lambda: self._zoom_editor(-1), accelerator="Ctrl+-")
-        view_menu.add_command(label="Reset Zoom", command=lambda: self._zoom_editor(0), accelerator="Ctrl+0")
+        view_menu.add_command(label="Reset Zoom", command=self._reset_zoom, accelerator="Ctrl+0")
+        view_menu.add_separator()
+        view_menu.add_command(label="Next Tab", command=lambda: self.tabs.cycle(1), accelerator="Alt+Right")
+        view_menu.add_command(label="Previous Tab", command=lambda: self.tabs.cycle(-1), accelerator="Alt+Left")
         view_menu.add_separator()
         view_menu.add_command(label="Toggle Line Numbers", command=lambda: self._toggle_setting("show_line_numbers"))
         view_menu.add_command(label="Toggle Word Wrap", command=lambda: self._toggle_setting("word_wrap"))
@@ -649,7 +658,7 @@ class ArduinoStudioApp(ctk.CTk):
             "<Control-s>": lambda event: self.save(),
             "<Control-S>": lambda event: self.save_all(),
             "<Control-o>": lambda event: self.open_project_dialog(),
-            "<Control-S-n>": lambda event: self.new_project(),
+            "<Control-Shift-N>": lambda event: self.new_project(),
             "<Control-r>": lambda event: self.verify(),
             "<Control-R>": lambda event: self.verify_clean(),
             "<Control-u>": lambda event: self.upload(),
@@ -665,6 +674,15 @@ class ArduinoStudioApp(ctk.CTk):
             "<Control-Shift-I>": lambda event: self.open_bootloader(),
             "<Control-Shift-E>": lambda event: self.show_example_picker(),
             "<Control-p>": lambda event: self.show_command_palette(),
+            "<Control-w>": lambda event: self.close_tab(),
+            "<Control-Shift-U>": lambda event: self.upload_programmer(),
+            "<Alt-Right>": lambda event: self.tabs.cycle(1),
+            "<Alt-Left>": lambda event: self.tabs.cycle(-1),
+            "<Control-Tab>": lambda event: self.tabs.cycle(1),
+            "<Control-Shift-Tab>": lambda event: self.tabs.cycle(-1),
+            "<Control-0>": lambda event: self._reset_zoom(),
+            "<F2>": lambda event: self._editor_action("next_error"),
+            "<Shift-F2>": lambda event: self._editor_action("prev_error"),
             "<F5>": lambda event: self.refresh_all(),
             "<F3>": lambda event: self._editor_action("find_next"),
             "<Shift-F3>": lambda event: self._editor_action("find_previous"),
@@ -2391,6 +2409,7 @@ class ArduinoStudioApp(ctk.CTk):
             "delete_line": editor.delete_line, "indent": editor.indent_selection,
             "outdent": editor.outdent_selection, "bracket": editor.jump_matching_bracket,
             "select_all": editor.select_all, "completions": editor.show_completions,
+            "next_error": editor.next_error, "prev_error": editor.previous_error,
         }
         handler = handlers.get(name)
         if handler is None:  # pragma: no cover
@@ -2422,6 +2441,31 @@ class ArduinoStudioApp(ctk.CTk):
         size = int(self.settings.editor_font_size or 12)
         size = max(6, min(40, size + (direction or 0)))
         self.settings.update(editor_font_size=size)
+        self.store.mark_dirty()
+        try:
+            self.tabs.apply_editor_settings()
+        except (AttributeError, tk.TclError):  # pragma: no cover
+            pass
+
+    def close_tab(self) -> None:
+        """File ▸ Close Tab (Ctrl+W) - closes the selected editor tab only."""
+        editor = self.tabs.selected_editor()
+        path = getattr(getattr(editor, "document", None), "path", None)
+        if path is None:
+            self.status.set_message("no tab to close")
+            return
+        try:
+            self.tabs.close_file(path)
+        except tk.TclError as exc:  # pragma: no cover - widget teardown race
+            self._log.warning("close tab failed: %s", exc)
+
+    def _reset_zoom(self) -> None:
+        """View ▸ Reset Zoom (Ctrl+0) - back to the configured editor size."""
+        default = 12
+        if int(self.settings.editor_font_size or default) == default:
+            self.status.set_message(f"editor zoom already at {default} pt")
+            return
+        self.settings.update(editor_font_size=default)
         self.store.mark_dirty()
         try:
             self.tabs.apply_editor_settings()

@@ -688,6 +688,157 @@ def test_app_flow() -> None:
 
 
 
+#: alias table: how a menu accelerator's key part may appear in a Tk sequence
+_KEY_ALIASES = {
+    "+": {"plus", "equal", "kp_add"},
+    "-": {"minus", "kp_subtract", "underscore"},
+    "`": {"grave"},
+    ",": {"comma"},
+    ".": {"period"},
+    "[": {"bracketleft"},
+    "]": {"bracketright"},
+    "\\": {"backslash"},
+    "/": {"slash", "keyslash"},
+    "0": {"0", "kp_0", "kp_space"},
+    " ": {"space"},
+}
+
+
+def _parse_sequence(raw: str) -> tuple[set[str], str]:
+    """``"<Control-Shift-Z>"`` -> ``({"control", "shift"}, "z")`` (upper implies Shift)."""
+    text = str(raw).strip()
+    if text.startswith("<") and text.endswith(">"):
+        text = text[1:-1]
+    parts = [part for part in text.replace("+", "-").split("-") if part]
+    if not parts:
+        return set(), ""
+    key = parts[-1]
+    mods = {part.lower() for part in parts[:-1] if part.lower() in {"control", "shift", "alt", "meta", "modifier"}}
+    if len(key) == 1 and key.isalpha() and key.isupper():
+        mods.add("shift")
+    return mods, key.lower()
+
+
+def _accelerator_is_bound(accelerator: str, bound: set[str]) -> bool:
+    """True when some bound sequence satisfies a menu accelerator label."""
+    accel_mods: set[str] = set()
+    key = ""
+    for token in str(accelerator or "").split("+"):
+        token = token.strip()
+        if not token:
+            continue
+        lowered = token.lower()
+        if lowered in {"ctrl", "control"}:
+            accel_mods.add("control")
+        elif lowered == "shift":
+            accel_mods.add("shift")
+        elif lowered in {"alt", "meta", "super", "win"}:
+            accel_mods.add("alt")
+        else:
+            key = lowered
+    if not key:
+        return True
+    wanted = _KEY_ALIASES.get(key, {key})
+    for raw in bound:
+        mods, bound_key = _parse_sequence(raw)
+        if bound_key in wanted and mods >= accel_mods:
+            return True
+    return False
+
+
+def test_menu_accelerators_are_actually_bound() -> None:
+    """A menu that advertises Ctrl+X must really bind Ctrl+X.
+
+    Walking the whole menu tree and comparing every ``accelerator=`` label with
+    the sequences actually bound on the app/editor widgets catches the classic
+    drift where a shortcut is renamed in one place only.
+    """
+    from arduino_studio.ui.app import create_app
+
+    tkstub.BOUND_SEQUENCES.clear()          # only this app's bindings may count
+    with tempfile.TemporaryDirectory() as tmp:
+        config = Path(tmp) / "cfg"
+        store = SettingsStore(config)
+        seed = store.load()
+        seed.update(first_run_completed=True)
+        store.save()
+        app = create_app(["--config-dir", str(config), "--no-setup"])
+        # open a real file: the editor widget owns most of the key bindings, and
+        # it only exists once a document has been opened.
+        manager = ProjectManager(Path(tmp) / "sketchbook")
+        project = manager.create_project(Path(tmp) / "sketchbook", "Menus", board_fqbn="arduino:avr:uno")
+        assert app.open_project(project.root), "the smoke harness must be able to open a project"
+        assert app.tabs.selected_editor() is not None, "an editor must be open to bind its keys"
+        menu = getattr(app, "menubar", None) or getattr(app, "_menubar", None)
+        assert menu is not None, "the app must expose its menu bar"
+        seen = 0
+        problems: list[str] = []
+        bound = tkstub.bound_sequences()
+
+        def walk(node: object, trail: str = "") -> None:
+            nonlocal seen
+            for entry in getattr(node, "entries", []) or []:
+                if "menu" in entry:
+                    walk(entry["menu"], f"{trail}{entry.get('label', '')} > ")
+                accel = str(entry.get("accelerator") or "")
+                if not accel or accel.lower() in {"alt+f4", "f1"}:
+                    continue  # native window keys are not ours to bind
+                seen += 1
+                if not _accelerator_is_bound(accel, bound):
+                    problems.append(f"{trail}{entry.get('label')!r} advertises {accel!r}")
+
+        walk(menu)
+        assert not problems, "unbound menu shortcuts: " + "; ".join(problems)
+        assert seen >= 25, f"expected the menus to advertise shortcuts, found {seen}"
+
+
+def test_libraries_panel_offers_unsafe_install_fix() -> None:
+    """When arduino-cli refuses a Git/ZIP install, the panel offers to enable the
+    config setting and retries - the whole loop, against the fake CLI."""
+    from arduino_studio.core.library_manager import LibraryManager
+    from arduino_studio.ui import libraries_panel
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        cli, manager, _boot = make_services(root)
+        cli.probe(fake_cli_path())  # keeps the ZIP fallback inside the sandbox
+        status: list[str] = []
+        runner = TaskRunner(ui_post=lambda func: (func(), None)[1])
+        panel = libraries_panel.LibrariesPanel(
+            tkstub.ROOT, PALETTE, manager=manager, runner=runner, settings=Settings(),
+            get_project=lambda: None, get_fqbn=lambda: "arduino:avr:uno",
+            on_status=status.append, on_add_include=lambda header: None,
+        )
+        try:
+            # refusing without the setting is the fake CLI's job
+            refused = manager.install_git("https://github.com/example/PanelLib.git")
+            assert refused.ok is False and "enable_unsafe_install" in refused.message
+
+            tkstub.DIALOGS.push(True)  # "Enable & retry"
+            retried = panel._offer_unsafe_retry(
+                lambda context: manager.install_git("https://github.com/example/PanelLib.git",
+                                                     branch="dev", context=context),
+                "PanelLib",
+            )
+            assert retried is True
+            assert wait_until(lambda: not panel._busy, timeout=20.0), "the retry never finished"
+            assert any("PanelLib" in line for line in status), status
+            config = (root / "fake-state" / "config.json")
+            assert config.is_file() and "library.enable_unsafe_install" in config.read_text(encoding="utf-8")
+
+            # declining must not submit anything and must not lose the failure message
+            before = list(status)
+            tkstub.DIALOGS.push(False)
+            assert panel._offer_unsafe_retry(lambda context: None, "Rejected") is False
+            assert status == before
+            # a second refusal is no longer possible: the setting is on now
+            assert manager.install_git("https://github.com/example/PanelLib2.git").ok
+        finally:
+            runner.shutdown()
+            panel.destroy()
+            del cli, manager
+
+
 def main() -> int:
     """Run every ``test_*`` function and report failures (pytest-free mode)."""
     tests = [(name, obj) for name, obj in sorted(globals().items())

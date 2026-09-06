@@ -584,6 +584,28 @@ class LibraryManager:
             ok=ok, message=message, scope="global",
         )
 
+    #: arduino-cli refuses --zip-path / --git-url unless this is true in its config
+    UNSAFE_INSTALL_SETTING = "library.enable_unsafe_install"
+
+    @classmethod
+    def blocks_unsafe_install(cls, text: str) -> bool:
+        """True when *text* is arduino-cli complaining about the unsafe-install setting."""
+        return cls._unsafe_install_disabled(text)
+
+    def enable_unsafe_install(self) -> CommandResult:
+        """Run ``arduino-cli config set library.enable_unsafe_install true``.
+
+        Deliberately uses the CLI rather than editing ``arduino-cli.yaml`` by
+        hand, so the change lands in whatever config file the CLI actually uses
+        (``Settings -> CLI config file`` is honoured).
+        """
+        result = self.cli.execute(["config", "set", self.UNSAFE_INSTALL_SETTING, "true"], timeout=120.0)
+        if result.ok:
+            self._log.info("enabled %s in the arduino-cli config", self.UNSAFE_INSTALL_SETTING)
+        else:
+            self._log.warning("could not enable %s: %s", self.UNSAFE_INSTALL_SETTING, result.output[-200:])
+        return result
+
     @staticmethod
     def _unsafe_install_disabled(output: str) -> bool:
         """True when arduino-cli refused because unsafe installs are switched off."""

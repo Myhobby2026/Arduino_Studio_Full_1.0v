@@ -540,7 +540,7 @@ class LibrariesPanel(ctk.CTkFrame):
         if not confirm:
             return
 
-        def work(context: Any) -> Any:
+        def perform_install(context: Any) -> Any:
             if zip_path:
                 return self.manager.install_zip(zip_path, project=self._project(),
                                                 project_local=project_local, on_line=context.log,
@@ -554,10 +554,7 @@ class LibrariesPanel(ctk.CTkFrame):
             return self.manager.install(specs[0], on_line=context.log, context=context,
                                         project=self._project(), project_local=project_local)
 
-        def done(result: TaskResult) -> None:
-            if not result.ok:
-                self._show_error("Installation failed", result)
-                return
+        def succeeded() -> None:
             self._status(f"installed {spec}" + (" (project)" if project_local else ""))
             self._toast("Library installed", f"{spec} is ready to use.\n"
                        "Add it with the 'Add #include' button or type the include yourself.")
@@ -565,9 +562,58 @@ class LibrariesPanel(ctk.CTkFrame):
                 self._on_project_changed()
             self.refresh_installed()
 
-        label = "install" if not zip_path else "install from ZIP"
-        self._submit(f"lib {label} {spec}", work, lane=LANE_BUILD, on_done=done,
+        def done(result: TaskResult) -> None:
+            if result.ok:
+                succeeded()
+                return
+            payload = getattr(result, "payload", None)
+            text = str(getattr(payload, "message", "") or "") or str(getattr(result, "error", "") or "")
+            if (zip_path or git_url) and self.manager.blocks_unsafe_install(text):
+                if self._offer_unsafe_retry(perform_install, spec):
+                    return
+            self._show_error("Installation failed", result)
+
+        label = "install" if not zip_path else ("install from ZIP" if zip_path else "install from Git")
+        self._submit(f"lib {label} {spec}", perform_install, lane=LANE_BUILD, on_done=done,
                      busy_label=f"{label} {spec}\u2026")
+
+    def _offer_unsafe_retry(self, perform_install, spec: str) -> bool:
+        """Ask whether to enable arduino-cli's unsafe-install setting, then retry.
+
+        Returns True when a retry was submitted (the caller should not report the
+        original failure), False when the user declined.
+        """
+        answer = ask_yes_no(
+            self,
+            "arduino-cli refuses installs from ZIP or Git by default",
+            detail=(f"Installing an archive or a Git URL is treated as unsafe by the CLI, so it must be "
+                    f"enabled once with:\n\n    arduino-cli config set "
+                    f"{self.manager.UNSAFE_INSTALL_SETTING} true\n\n"
+                    f"Enable it now and retry installing {spec}?"),
+            yes_label="Enable & retry", palette=self.palette,
+        )
+        if not answer:
+            return False
+
+        def work(context: Any) -> Any:
+            config = self.manager.enable_unsafe_install()
+            if config.ok:
+                context.log(f"enabled {self.manager.UNSAFE_INSTALL_SETTING} in the arduino-cli config", "ok")
+            else:
+                context.log("could not change the CLI config, trying the install anyway: "
+                            f"{(config.output or '').strip()[-200:]}", "warning")
+            return perform_install(context)
+
+        def retry_done(result: TaskResult) -> None:
+            if result.ok:
+                self._status(f"installed {spec}")
+                self.refresh_installed()
+                return
+            self._show_error("Installation failed after enabling unsafe installs", result)
+
+        self._submit(f"lib config set unsafe install + retry {spec}", work, lane=LANE_BUILD,
+                     on_done=retry_done, busy_label=f"enabling unsafe installs for {spec}\u2026")
+        return True
 
     def _missing_dependencies(self, record: Optional[LibraryRecord]) -> list[str]:
         """Names of declared dependencies that are not installed yet."""

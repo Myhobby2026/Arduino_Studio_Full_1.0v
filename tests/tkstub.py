@@ -34,6 +34,19 @@ __all__ = ["install", "installed", "pump", "reset", "ROOT", "next_dialog_answer"
 _INSTALLED = False
 _counter = itertools.count(1)
 
+#: every key sequence bound on any stubbed widget (used to verify menu accelerators)
+BOUND_SEQUENCES: list[str] = []
+
+
+def bound_sequences() -> set[str]:
+    """All sequences bound so far, normalised (``<Control-Shift-Z>``)."""
+    out: set[str] = set()
+    for raw in BOUND_SEQUENCES:
+        text = str(raw).strip()
+        if text:
+            out.add(text if text.startswith("<") else f"<{text}>")
+    return out
+
 
 # --------------------------------------------------------------------- helpers
 class TextModel:
@@ -442,6 +455,7 @@ class _Widget:
         if func is None:
             return ""
         self._bindings.setdefault(sequence, []).append(func)
+        BOUND_SEQUENCES.append(str(sequence))
         return f"bind#{next(_counter)}"
 
     def bind_all(self, sequence: str = "", func: Optional[Callable[[Any], Any]] = None,
@@ -2695,6 +2709,7 @@ def patch_dialogs() -> None:
 def reset() -> None:
     """Clear queued callbacks, dialogs and clipboard between tests."""
     reset_after_queue()
+    BOUND_SEQUENCES.clear()
     DIALOGS.clear()
     CLIPBOARD["value"] = ""
     _FileDialogModule.answers = []

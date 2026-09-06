@@ -414,6 +414,8 @@ def test_library_manager_zip_git_and_project_local() -> None:
         action = manager.install_zip(make_zip(box.tmp / "MyLib.zip"))
         assert action.ok, action.message
         assert action.record.name == "MyLib"
+        # arduino-cli needs the unsafe-install setting before it accepts a Git URL
+        assert manager.enable_unsafe_install().ok
         git = manager.install_git("https://github.com/example/MyLib.git", branch="dev")
         assert git.ok, git.message
         assert git.record.repository_url.endswith("MyLib.git")
@@ -427,6 +429,33 @@ def test_library_manager_zip_git_and_project_local() -> None:
         record = next(record for record in local if record.name == "LocalLib")
         assert manager.remove_project_library(project, record) is True
         assert not (project.root / "libraries" / "LocalLib").exists()
+
+
+def test_library_unsafe_install_setting_is_respected() -> None:
+    """ZIP/Git installs are gated by arduino-cli's ``library.enable_unsafe_install``.
+
+    The fake CLI mirrors the real refusal, so this covers the whole loop:
+    refuse -> explain -> ``config set`` -> retry succeeds.
+    """
+    with Sandbox() as box:
+        cli = box.cli
+        cli.probe(str(FAKE_CLI))  # keeps the fallback extraction inside the sandbox
+        manager = LibraryManager(cli, data_dir=box.tmp / "libdata")
+        action = manager.install_zip(make_zip(box.tmp / "UnsafeLib.zip"))
+        assert action.ok, action.message
+        assert "unpacked by Arduino Studio" in action.message or "--zip" in action.message, action.message
+        refused = manager.install_git("https://github.com/example/UnsafeLib.git")
+        assert refused.ok is False, "the CLI must be able to say no"
+        assert "enable_unsafe_install" in refused.message, refused.message
+        raw = cli.execute(["lib", "install", "--git-url", "https://github.com/example/X.git"],
+                          echo_command=False)
+        assert raw.returncode != 0 and manager.blocks_unsafe_install(raw.output)
+        config = manager.enable_unsafe_install()
+        assert config.ok, config.output
+        retried = manager.install_git("https://github.com/example/UnsafeLib.git", branch="dev")
+        assert retried.ok, retried.message
+        assert retried.record.name == "UnsafeLib"
+        assert manager.uninstall("UnsafeLib").returncode == 0
 
 
 def test_bootloader_plans_and_gating() -> None:

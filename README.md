@@ -183,25 +183,32 @@ want on every call can go in the *Extra CLI arguments* field (`cli_extra_args`).
 
 ## First run
 
-Start Studio. If it has not been configured yet you will see the **setup
-screen**, which asks for everything it cannot safely guess:
+Start Studio. If it has not been configured yet you get a four-page setup
+window (`_STEPS = Welcome · arduino-cli · Folders · Board & port`) that asks
+only for what it cannot safely guess:
 
-1. **arduino-cli location** — *Detect* finds it on `PATH`, in the usual install
-   folders and next to Studio; the version is validated against the minimum
-   supported (0.32.0). You can always browse to the `.exe` instead.
-2. **Data / sketchbook folders** — defaults come from `arduino-cli config dump`.
-3. **Board Manager URLs** — three common third-party index URLs are offered as
-   checkboxes (ESP32, ESP8266 and the MegaTinyCore-style AVR cores). Tick what
-   you want; you can add more later in Settings.
-4. **Update the index now?** — runs `core update-index` + `lib update-index` in
-   the background so the first search/install does not stall.
-5. **Your first board** — pick a board and (optionally) a port, so Verify works
-   on the very first sketch.
+1. **Welcome** — what the app needs and why, with the CLI download link.
+2. **arduino-cli** — the path to the executable, with *Detect* (searches `PATH`,
+   the usual install folders and next to Studio) and a live version check
+   against the supported minimum (0.32.0); browsing always works, and "Arduino
+   CLI not verified" warns instead of blocking if you want to continue anyway.
+3. **Folders** — the CLI's `directories.data` (cores/libraries) and
+   `directories.user` (sketchbook); leave them empty to keep arduino-cli's own
+   defaults. Underneath are three checkboxes that add a Board Manager URL for
+   `esp8266:esp8266`, `esp32:esp32` and `attiny:avr` (the Drazzy megaTinyCore
+   index, which is what ATtiny bootloader burning needs).
+4. **Board & port** — a board picker (with *From CLI* to pull `board listall`),
+   a port picker with *Rescan*, an optional custom FQBN that overrides the
+   picker, and "create a blank sketch for this board on start-up".
 
-The screen writes `first_run_completed` and never appears again; **Help ▸ Run
-Setup Wizard Again** (or `--setup`) brings it back. If Studio cannot find
-`arduino-cli` at any later time, a dialog offers *Locate it*, *Install it*
-(shows the download page) and *Open Settings*.
+On **Finish** Studio rebuilds its CLI wrapper, refreshes boards and ports,
+probes the version again in the background and — if no project is open — offers
+the starter sketch so Verify does something immediately. `first_run_completed`
+is then written and the wizard never appears on its own again; **Help ▸ Run Setup
+Wizard Again** (or `--setup`) brings it back, `--no-setup` suppresses it.
+
+If `arduino-cli` goes missing later, a dialog offers *Locate it*, *Install it*
+and *Open Settings* instead of failing on the next compile.
 
 ---
 
@@ -233,7 +240,8 @@ Handy from a terminal (Studio runs the same commands under the hood):
 ```bat
 arduino-cli core update-index
 arduino-cli core install arduino:avr
-arduino-cli core install esp32:esp32 --additional-urls https://arduino.espressif.com/package_esp32_index.json
+arduino-cli core install esp32:esp32 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+arduino-cli core install esp8266:esp8266 --additional-urls https://arduino.esp8266.com/stable/package_esp8266com_index.json
 arduino-cli core install esp8266:esp8266
 arduino-cli board listall
 arduino-cli board list
@@ -284,33 +292,48 @@ BlinkDetector/
 ├── src/
 │   └── example.cpp        source template that includes its header
 ├── libraries/             project-specific libraries live here
-│   └── README.md          explains the folder (kept out of git by the .gitignore)
+│   └── README.md          explains the folder and how to use it
 └── project.json           name, main file, FQBN, port, build options, files
 ```
 
 * Other files are created from templates too: a new `.h`/`.hpp` gets a guard
   named after the project, a new `.cpp` gets the matching include.
-* **project.json** holds `schema_version`, `name`, `main_file`, `board_fqbn`,
-  `port`, `build` (`warnings`, `optimize_debug`, `extra_properties`,
-  `export_binaries`, `keep_build_dir`), `editor` (`tab_size`, `insert_spaces`)
-  and `libraries`. Studio rewrites it on save; you can also edit it in a tab.
+* **project.json** is one flat `ProjectManifest`: `schema_version`, `name`,
+  `main_file`, `board_fqbn`, `port`, `description`, `author`, `created`,
+  `modified`, `build_properties` (`key=value` pairs forwarded to the compiler as
+  `--build-property`), `extra_flags`, `libraries` (name/version/scope entries
+  for the `libraries/` folder), `open_files` (so the tab layout comes back) and
+  `notes`. Unknown keys are ignored on load and preserved nowhere else, so keep
+  project-specific data in `notes`. Studio rewrites the file when the project
+  state changes; you can also edit it in a tab and press **Sketch ▸ Reload Files
+  from Disk**-style refresh or reopen the project.
 * Opening a plain folder that only contains `Foo.ino` works too: Studio adopts
   the folder and writes the missing `project.json` (never overwriting an
   existing one). This is how you open projects made with the Arduino IDE.
-* **Rename Project** renames the folder, the `.ino`, the `#include` references
-  and the manifest in one step. **Duplicate Project** copies everything except
-  `build/` and `.git/`. **Delete** moves the folder to the Recycle Bin when
-  `send2trash` is installed, otherwise it is zipped next to the project first —
-  nothing is silently unlinked.
+* **Rename Project** renames the folder, the primary `.ino`, the manifest's
+  `name`/`main_file` and — if the folder name was taken — reverts the whole
+  operation instead of leaving a half-renamed project behind. **Duplicate
+  Project** copies everything except `build/` and `.git/`, using the name you
+  typed (a `-copy` suffix only when that folder already exists). **Delete**
+  sends the folder to the Recycle Bin when `send2trash` is installed, otherwise
+  it is zipped next to the project first — nothing is silently unlinked.
 * Names are validated against Windows' rules, so `con`, `nul.txt`, `a/b` or a
   name starting with a digit are refused with an explanation instead of an
   `OSError` from `arduino-cli`.
 
-The explorer is a tree of the project files with the type glyphs
-(`ino`, `h`, `cpp`, `json`, …), a right-click menu (New File / New Folder /
-Rename / Duplicate / Delete / Add to Sketch / Show in Explorer / Insert
-`#include`), and double-click to open a tab. Tabs can be dragged-free of
-charge, closed with the ✕ or Ctrl+W, and show a dot when unsaved.
+The explorer is a tree of the project files with a type glyph per extension
+(`ino`, `h`, `cpp`, `json`, …) and a right-click menu: *New file…*,
+*New folder…*, *Add existing file…*, *Rename (F2)*, *Duplicate*,
+*Delete (Del)*, *Copy full path*, *Copy relative path*, *Show in Explorer*,
+*Open with Windows editor*, plus (on the project root) *Show project in
+Explorer*, *Open project folder in terminal* and *Project properties…*.
+Double-click opens a file in a tab.
+
+Tabs show a dot when unsaved and close with the ✕, **Ctrl+W** or a middle-click;
+the strip scrolls with the mouse wheel, and the right-click menu offers
+*Save <name> · Save all · Close · Close others · Close all · Revert to saved ·
+Copy full path · Copy file name · Show in Explorer*. **Alt+←/Alt+→** (or
+Ctrl+Tab) cycle tabs.
 
 ---
 
@@ -332,10 +355,14 @@ Buttons: **Install**, **Remove**, **Update selected**, **Update all**,
 **Install into project's libraries/** checkbox (remembered in `lib_use_project_dir`).
 
 * ZIP and Git installs are the "unsafe" ones in arduino-cli, so they need
-  `library.enable_unsafe_install: true` in `arduino-cli.yaml`. Studio checks the
-  CLI's answer: if the CLI refuses, it *explains* and offers to write the
-  setting for you; if the CLI is too old to know `--zip-path` at all, Studio
-  extracts the archive into the right folder itself and tells you that it did.
+  `library.enable_unsafe_install: true` in its config. When the CLI refuses,
+  Studio says so and offers **Enable & retry**, which runs
+  `arduino-cli config set library.enable_unsafe_install true` (through the CLI,
+  so the right config file is touched) and repeats your install. If the CLI is
+  too old to know `--zip-path` at all, Studio falls back to `--zip_path`, then to
+  unpacking the archive into `libraries/` itself - and says in the console that
+  it did it by extraction. A Git URL with a branch (`…git#dev`) is passed as
+  `--git-url <url>#dev`, and retried without the fragment if the CLI rejects it.
 * Git installs accept `https://github.com/you/Adafruit_Foo.git#branch` and pass
   the branch through `--git-url`.
 * Missing include detection: when a compile fails with
@@ -508,29 +535,33 @@ the project's `board_fqbn` is pre-filled so Verify works immediately.
 
 ## Menus and keyboard shortcuts
 
-The toolbar holds **New Project · Open · Save | Verify · Upload | Board · Port ·
-Serial Monitor · Libraries · Bootloader | Settings**, plus **Cancel task**. The
+The toolbar is icon-based with a tooltip on every button:
+**New project · Open · Save | Verify · Upload | Board ▾ · Port ▾ · Refresh |
+Serial Monitor · Libraries · Bootloader · Settings**, and **Cancel task** beside
+them, which only does something while a build/flash/install is running. The
 status bar shows project · board · port · memory after the last build · current
 operation · clock, so you can read the state of the toolchain without opening a
 menu.
 
-| Shortcut | Action | Shortcut | Action |
-| --- | --- | --- | --- |
-| Ctrl+Shift+N | New project | Ctrl+M | Serial monitor |
-| Ctrl+O | Open project | Ctrl+Shift+L | Manage libraries |
-| Ctrl+S / Ctrl+Shift+S | Save / Save all | Ctrl+` | Integrated terminal |
-| Ctrl+W | Close tab | Ctrl+Shift+I | Bootloader manager |
-| Ctrl+R / Ctrl+Shift+R | Verify / clean verify | Ctrl+F / F3 / Shift+F3 | Find / next / previous |
-| Ctrl+U | Upload | Ctrl+H | Replace |
-| Ctrl+Shift+U | Upload using programmer | Ctrl+G | Go to line |
-| Ctrl+, | Settings | Ctrl+/ | Toggle comment |
-| Ctrl+B | Toggle explorer | Alt+←/→ | Previous / next tab |
-| Ctrl+J | Toggle bottom panel | Ctrl+Shift+P | Command palette |
-| F5 | Refresh boards and ports | Ctrl+E | Command palette (also) |
-| Ctrl+= / Ctrl+- | Editor zoom in / out | Ctrl+Shift+E | New example… |
-| Ctrl+Q | Quit | Ctrl+Shift+B | Verify (alternate) |
+Every accelerator below is bound in the running app, and a smoke test
+(`test_menu_accelerators_are_actually_bound`) walks the whole menu tree to make
+sure no menu item advertises a shortcut that nothing binds.
 
-The **Command Palette** (Ctrl+Shift+P or Ctrl+E) is a fuzzy list of every action
+| App-wide | Bottom panel / views | Editor (while the code area has focus) | Editor (while the code area has focus) |
+| --- | --- | --- |
+| Ctrl+Shift+N new project | Ctrl+B toggle explorer | Tab / Shift+Tab indent / outdent |
+| Ctrl+O open project | Ctrl+J toggle bottom panel | Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z undo / redo |
+| Ctrl+S save, Ctrl+Shift+S save all | Ctrl+M serial monitor | Ctrl+X / Ctrl+C / Ctrl+V / Ctrl+A cut, copy, paste, select all |
+| Ctrl+W close tab | Ctrl+\` integrated terminal | Ctrl+D duplicate line · Ctrl+Shift+K delete line · Ctrl+K cut line |
+| Ctrl+R verify, Ctrl+Shift+R clean verify | Ctrl+Shift+L manage libraries | Alt+↑ / Alt+↓ move line · Shift+Alt+↑ / ↓ duplicate line |
+| Ctrl+U upload, Ctrl+Shift+U upload using programmer | Ctrl+Shift+I bootloader manager | Ctrl+/ toggle comment |
+| Ctrl+G go to line | Ctrl+Shift+E new example | Ctrl+[ or Ctrl+] go to matching bracket |
+| Ctrl+F find, Ctrl+H replace | Ctrl+P command palette | Ctrl+L select line · Ctrl+Space completions |
+| F3 / Shift+F3 find next / previous | F5 refresh boards and ports | Ctrl+Home / Ctrl+End document start / end |
+| F2 / Shift+F2 next / previous build error | Alt+→ / Alt+← / Ctrl+Tab / Ctrl+Shift+Tab cycle tabs | Ctrl+= or Ctrl++ zoom in · Ctrl+- zoom out · Ctrl+0 reset zoom |
+| Escape close the find bar | View ▸ Console / Serial Monitor / Terminal | Page Up / Page Down |
+
+The **Command Palette** (Ctrl+P) is a fuzzy list of every action
 — the fastest way to find *Backup Firmware*, *Open Settings Folder*, *Clean
 Build Cache*, *New Project* and the rest without hunting menus.
 
@@ -640,7 +671,7 @@ download is performed by `arduino-cli`.
 | *"arduino-cli is too old"* | Studio needs **0.32.0+** (JSON output shapes). `winget upgrade Arduino.ArduinoCLI`. |
 | Compile fails with *"platform … not found"* | **Tools ▸ Install Core for Current Board** (or `arduino-cli core install arduino:avr`). For ESP32/ESP8266 add the Board Manager URL first. |
 | `fatal error: SomeLib.h: No such file or directory` | Click **Install** in the prompt Studio raises, or install it from the Library Manager; library-level `#include "…"` from `src/` works because both `src/` and `libraries/` are on the include path. |
-| ZIP/Git install says *"installing ZIP/Git archives is disabled"* | Studio will offer to set `library.enable_unsafe_install: true` for you; the equivalent is `arduino-cli config set library.enable_unsafe_install true`. |
+| ZIP/Git install is refused with *"…is not allowed; set `library.enable_unsafe_install: true`"* | Click **Enable & retry** - Studio runs `arduino-cli config set library.enable_unsafe_install true` and repeats the install. (ZIP installs work even without it: Studio unpacks the archive into `libraries/` itself and says so in the console.) |
 | Port list is empty | Windows: install the CH340/CP210x/FTDI driver and check Device Manager; try another cable (charge-only cables are common). Then **F5**. |
 | Upload: `avrdude: ser_open(): can't open device` | The port is in use — close the Serial Monitor (Studio closes it itself before uploading, but another program may hold it), or pick the right COM number. |
 | Upload: `stk500_getsync(): not in sync: resp=0x00` | Wrong board/FQBN, board not in bootloader, bad cable, or the Uno auto-reset is disabled. Try **Upload Using Programmer** or hold-reset on boards with a button. |
@@ -665,9 +696,11 @@ python tests/test_core_flow.py     :: 22 tests: projects, settings, CLI argv sha
                                      terminal, threading, process layer, examples
 python tests/test_ui_smoke.py      :: 16 tests: every panel/dialog, driven against a
                                      Tk stub so they run headless
-python -m arduino_studio --check   :: headless support report (Python, Tk, pyserial,
-                                     CustomTkinter, arduino-cli, folders) - exits 1
-                                     when something essential is missing
+python -m arduino_studio --check   :: headless support report - settings/log/data
+                                     paths, arduino-cli version + data dir,
+                                     pyserial, tkinter (Tk/Tcl versions),
+                                     customtkinter, board presets, exit status;
+                                     exits 1 when something essential is missing
 ```
 
 Both suites are plain scripts (they also work under `pytest`, if you installed

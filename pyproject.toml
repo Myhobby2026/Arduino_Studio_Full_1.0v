@@ -65,6 +65,10 @@ ignore = [
     "RUF002",
     "RUF003",
     "UP038",  # isinstance unions with | are 3.10+, this codebase targets 3.9
+    "UP006",  # annotations stay typing.List/Dict so dataclasses keep working on 3.9
+    "UP007",  # ... and Optional[X] over X | None for the same reason
+    "UP045",
+    "RET504", # "unnecessary assignment before return" hurts readability in the UI layer
 ]
 
 [tool.ruff.lint.per-file-ignores]
